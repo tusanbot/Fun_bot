@@ -605,7 +605,7 @@ async function generateGroqAnswer(
     { role: "user", content: prompt.slice(0, 1800) },
   ];
   const credentials: Array<{provider:"xai"|"groq";key:string;id:number|null}> = [];
-  const savedKeys = await env.DB.prepare("SELECT id,provider,encrypted_key FROM api_keys WHERE enabled=1 ORDER BY id ASC")
+  const savedKeys = await env.DB.prepare("SELECT id,provider,encrypted_key FROM api_keys WHERE enabled=1 ORDER BY CASE WHEN last_status IN ('rate_limited','request_error','decrypt_error','invalid') THEN 1 ELSE 0 END, id ASC")
     .all<{id:number;provider:string;encrypted_key:string}>();
   for (const row of savedKeys.results ?? []) {
     try { credentials.push({provider:row.provider === "groq" ? "groq" : "xai",key:await decryptApiKey(env,row.encrypted_key),id:row.id}); }
