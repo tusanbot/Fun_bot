@@ -409,6 +409,27 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       return;
     }
     if (!message.from) return;
+    try {
+      const member = await telegramApi<{ status: string }>(env, "getChatMember", {
+        chat_id: message.chat.id,
+        user_id: message.from.id,
+      });
+      if (member.status !== "creator" && member.status !== "administrator") {
+        await telegramApi(env, "sendMessage", {
+          chat_id: message.chat.id,
+          text: "برای ثبت تاریخچه، دستور /history را باید یکی از مدیران گروه ارسال کند.",
+          reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+        });
+        return;
+      }
+    } catch {
+      await telegramApi(env, "sendMessage", {
+        chat_id: message.chat.id,
+        text: "نتوانستم دسترسی مدیر گروه را بررسی کنم. مطمئن شو ربات هنوز عضو گروه است و دوباره تلاش کن.",
+        reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+      });
+      return;
+    }
     await ensureHistoryImportTable(env);
     await env.DB.prepare(
       `INSERT INTO history_import_sessions (user_id, chat_id, chat_title, expires_at)
