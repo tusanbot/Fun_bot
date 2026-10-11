@@ -198,7 +198,7 @@ async function generateGroqAnswer(
       "content-type": "application/json",
     },
     body: JSON.stringify({
-      model: env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      model: env.GROQ_MODEL || "openai/gpt-oss-120b",
       temperature: 0.7,
       max_tokens: 700,
       messages: [
