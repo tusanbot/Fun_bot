@@ -714,14 +714,13 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     await telegramApi(env, "sendMessage", {
       chat_id: message.chat.id,
       text:
-        "تنظیم کلید API هوش مصنوعی Groq\n\n" +
-        "۱) از دکمه زیر وارد صفحه رسمی ساخت کلید شو.\n" +
-        "۲) یک API Key بساز و کپی کن.\n" +
-        "۳) در Cloudflare برو به Workers & Pages → fun-bot → Settings → Variables and Secrets.\n" +
-        "۴) مقدار GROQ_API_KEY را به‌صورت Secret ثبت یا به‌روزرسانی کن و Worker را دوباره Deploy کن.\n\n" +
-        "برای امنیت، کلید را در گروه یا برای خود ربات تلگرام ارسال نکن و داخل GitHub قرار نده.",
+        "تنظیم کلید API هوش مصنوعی xAI / Grok\n\n" +
+        "۱) از لینک رسمی زیر کلید بساز.\n" +
+        "۲) در پیوی ربات دستور /manage را باز کن و «مدیریت کلیدهای AI» → «افزودن کلید» را بزن.\n" +
+        "۳) کلید را فقط در پیوی بفرست؛ ربات آن را رمزگذاری می‌کند و برای حذف پیام ورودی تلاش می‌کند.\n\n" +
+        "برای فعال شدن مدیریت کلیدها، مدیر باید ADMIN_USER_IDS و KEY_ENCRYPTION_SECRET را در Cloudflare تنظیم کرده باشد. کلید را در گروه یا GitHub ارسال نکن.",
       reply_markup: {
-        inline_keyboard: [[{ text: "دریافت کلید API از Groq", url: "https://console.groq.com/keys" }]],
+        inline_keyboard: [[{ text: "دریافت کلید API از xAI", url: "https://console.x.ai/" }]],
       },
     });
     return;
