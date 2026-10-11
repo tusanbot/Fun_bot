@@ -3,10 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2026-10-11"
 
 [vars]
-BOT_USERNAME = "replace_with_bot_username"
+BOT_USERNAME = "Ai_sokhangoo_bot"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "fun-bot-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_name = "fun"
+database_id = "4e67f352-83c8-42f2-a8d4-1367bebf8254"
 migrations_dir = "migrations"
