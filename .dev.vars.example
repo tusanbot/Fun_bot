@@ -1,4 +1,13 @@
 # Copy to .dev.vars locally. Never commit .dev.vars.
 TELEGRAM_BOT_TOKEN=replace_me
 WEBHOOK_SECRET=replace_with_a_long_random_secret
-GROQ_API_KEY=replace_with_your_groq_api_key
+# Comma-separated numeric Telegram user IDs allowed to use /manage and approve groups.
+ADMIN_USER_IDS=replace_with_your_telegram_user_id
+# Use a random secret of at least 32 characters; keep it private and stable.
+KEY_ENCRYPTION_SECRET=replace_with_a_random_secret_at_least_32_characters
+# Optional direct provider keys. Prefer adding xAI keys through /manage.
+XAI_API_KEY=
+XAI_MODEL=grok-3-mini
+# Optional legacy compatibility:
+GROQ_API_KEY=
+GROQ_MODEL=openai/gpt-oss-120b
