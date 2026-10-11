@@ -1,5 +1,6 @@
--- Group approval, bot settings, encrypted API key pool, and admin input sessions.
-ALTER TABLE groups ADD COLUMN approved INTEGER NOT NULL DEFAULT 0;
+-- Preserve existing approved/active groups while adding approval for future groups.
+-- New groups are inserted explicitly with approved=0 by the Worker.
+ALTER TABLE groups ADD COLUMN approved INTEGER NOT NULL DEFAULT 1;
 
 CREATE TABLE IF NOT EXISTS bot_settings (
   setting_key TEXT PRIMARY KEY,
