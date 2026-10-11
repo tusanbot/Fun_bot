@@ -280,11 +280,11 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     await telegramApi(env, "sendMessage", {
       chat_id: message.chat.id,
       text:
-        "تنظیم کلید API هوش مصنوعی Groq\\n\\n" +
-        "۱) از دکمه زیر وارد صفحه رسمی ساخت کلید شو.\\n" +
-        "۲) یک API Key بساز و کپی کن.\\n" +
-        "۳) در Cloudflare برو به Workers & Pages → fun-bot → Settings → Variables and Secrets.\\n" +
-        "۴) مقدار GROQ_API_KEY را به‌صورت Secret ثبت یا به‌روزرسانی کن و Worker را دوباره Deploy کن.\\n\\n" +
+        "تنظیم کلید API هوش مصنوعی Groq\n\n" +
+        "۱) از دکمه زیر وارد صفحه رسمی ساخت کلید شو.\n" +
+        "۲) یک API Key بساز و کپی کن.\n" +
+        "۳) در Cloudflare برو به Workers & Pages → fun-bot → Settings → Variables and Secrets.\n" +
+        "۴) مقدار GROQ_API_KEY را به‌صورت Secret ثبت یا به‌روزرسانی کن و Worker را دوباره Deploy کن.\n\n" +
         "برای امنیت، کلید را در گروه یا برای خود ربات تلگرام ارسال نکن و داخل GitHub قرار نده.",
       reply_markup: {
         inline_keyboard: [[{ text: "دریافت کلید API از Groq", url: "https://console.groq.com/keys" }]],
@@ -298,9 +298,9 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       await telegramApi(env, "sendMessage", {
         chat_id: message.chat.id,
         text:
-          "برای واردکردن تاریخچه، ابتدا در خود گروه دستور /history را بفرست تا شناسه گروه را ببینی.\\n" +
-          "سپس در Telegram Desktop از منوی گروه → Export chat history خروجی JSON بگیر.\\n" +
-          "راهنمای کامل و دستور واردسازی در مخزن Fun_bot قرار دارد: https://github.com/tusanbot/Fun_bot# واردسازی-تاریخچه-قدیمی",
+          "برای واردکردن تاریخچه، ابتدا در خود گروه دستور /history را بفرست تا شناسه گروه را ببینی.\n" +
+          "سپس در Telegram Desktop از منوی گروه → Export chat history خروجی JSON بگیر.\n" +
+          "راهنمای کامل و دستور واردسازی در مخزن Fun_bot قرار دارد: https://github.com/tusanbot/Fun_bot#history-import",
       });
       return;
     }
@@ -308,14 +308,14 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     await telegramApi(env, "sendMessage", {
       chat_id: message.chat.id,
       text:
-        "ثبت تاریخچه این گروه\\n" +
-        `نام گروه: ${message.chat.title ?? "بدون عنوان"}\\n` +
-        `شناسه گروه: ${message.chat.id}\\n\\n` +
-        "۱) Telegram Desktop را باز کن و از منوی همین گروه گزینه Export chat history را بزن؛ فرمت JSON پیشنهاد می‌شود.\\n" +
-        "۲) فایل را در پوشه‌ای از مخزن Fun_bot قرار بده.\\n" +
-        "۳) در PowerShell، از پوشه اصلی مخزن این دستور را اجرا کن و مسیر فایل و عنوان گروه را جایگزین کن:\\n\\n" +
-        `python ingestion/import_to_d1.py "C:\\مسیر\\result.json" --chat-id "${message.chat.id}" --chat-title "${(message.chat.title ?? "نام گروه").replace(/"/g, "'")}" --remote\\n\\n` +
-        "واردسازی روی D1 اصلی انجام می‌شود؛ پیام‌های تکراری دوباره ثبت نمی‌شوند. قبل از اجرا از فایل خروجی نسخه پشتیبان نگه دار.\\n" +
+        "ثبت تاریخچه این گروه\n" +
+        `نام گروه: ${message.chat.title ?? "بدون عنوان"}\n` +
+        `شناسه گروه: ${message.chat.id}\n\n` +
+        "۱) Telegram Desktop را باز کن و از منوی همین گروه گزینه Export chat history را بزن؛ فرمت JSON پیشنهاد می‌شود.\n" +
+        "۲) فایل را در پوشه‌ای از مخزن Fun_bot قرار بده.\n" +
+        "۳) در PowerShell، از پوشه اصلی مخزن این دستور را اجرا کن و مسیر فایل و عنوان گروه را جایگزین کن:\n\n" +
+        `python ingestion/import_to_d1.py "C:\\مسیر\\result.json" --chat-id "${message.chat.id}" --chat-title "${(message.chat.title ?? "نام گروه").replace(/"/g, "'")}" --remote\n\n` +
+        "واردسازی روی D1 اصلی انجام می‌شود؛ پیام‌های تکراری دوباره ثبت نمی‌شوند. قبل از اجرا از فایل خروجی نسخه پشتیبان نگه دار.\n" +
         "راهنمای کامل: https://github.com/tusanbot/Fun_bot",
       reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
     });
