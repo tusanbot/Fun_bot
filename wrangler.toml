@@ -1,0 +1,12 @@
+name = "fun-bot"
+main = "src/index.ts"
+compatibility_date = "2026-10-11"
+
+[vars]
+BOT_USERNAME = "replace_with_bot_username"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "fun-bot-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+migrations_dir = "migrations"
