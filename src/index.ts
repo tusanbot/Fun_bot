@@ -212,7 +212,7 @@ async function importTelegramExport(
   const entries = payload.messages.filter((item) => item && item.type === "message" && item.id !== undefined);
   let imported = 0;
   let skipped = 0;
-  const batchSize = 80;
+  const batchSize = 40;
 
   for (let offset = 0; offset < entries.length; offset += batchSize) {
     const batchEntries = entries.slice(offset, offset + batchSize);
@@ -430,6 +430,14 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   }
 
   if (message.chat.type === "private" && message.document) {
+    if (message.document.file_size && message.document.file_size > 19 * 1024 * 1024) {
+      await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: "فایل بیش از ۱۹ مگابایت است؛ لطفاً تاریخچه را در بخش‌های کوچک‌تر خروجی بگیر." });
+      return;
+    }
+    if (message.document.file_name && !message.document.file_name.toLowerCase().endsWith(".json")) {
+      await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: "لطفاً فایل JSON خروجی Telegram Desktop را ارسال کن." });
+      return;
+    }
     try {
       const result = await importTelegramExport(env, message, message.document.file_id);
       await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: result });
