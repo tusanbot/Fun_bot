@@ -37,6 +37,7 @@ interface TelegramMessage {
   caption_entities?: TelegramEntity[];
   from?: TelegramUser;
   chat: TelegramChat;
+  document?: { file_id: string; file_name?: string; mime_type?: string; file_size?: number };
   reply_to_message?: {
     message_id: number;
     from?: TelegramUser;
@@ -148,6 +149,112 @@ async function saveMessage(env: Env, message: TelegramMessage): Promise<void> {
     content,
     message.reply_to_message ? String(message.reply_to_message.message_id) : null,
   ).run();
+}
+
+
+async function ensureHistoryImportTable(env: Env): Promise<void> {
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS history_import_sessions (
+      user_id TEXT PRIMARY KEY,
+      chat_id TEXT NOT NULL,
+      chat_title TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL
+    )`,
+  ).run();
+}
+
+async function importTelegramExport(
+  env: Env,
+  message: TelegramMessage,
+  fileId: string,
+): Promise<string> {
+  if (!message.from) throw new Error("Telegram sender is unavailable");
+  await ensureHistoryImportTable(env);
+  const session = await env.DB.prepare(
+    `SELECT chat_id, chat_title FROM history_import_sessions
+     WHERE user_id = ? AND expires_at > datetime('now')`,
+  ).bind(String(message.from.id)).first<{ chat_id: string; chat_title: string | null }>();
+  if (!session) {
+    return "برای این حساب واردسازی فعالی پیدا نکردم. ابتدا در گروه مقصد دستور /history را بفرست و بعد فایل را همین‌جا ارسال کن.";
+  }
+
+  const file = await telegramApi<{ file_path?: string }>(env, "getFile", { file_id: fileId });
+  if (!file.file_path || !/\\.(json)$/i.test(file.file_path)) {
+    return "فعلاً فقط فایل JSON خروجی Telegram Desktop پشتیبانی می‌شود. هنگام خروجی گرفتن، فرمت JSON را انتخاب کن.";
+  }
+  const download = await fetch(
+    `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`,
+  );
+  if (!download.ok) throw new Error(`Telegram file download failed (${download.status})`);
+  const raw = await download.text();
+  if (raw.length > 19 * 1024 * 1024) {
+    return "فایل خیلی بزرگ است. لطفاً تاریخچه را به بخش‌های کوچک‌تر خروجی بگیر؛ سقف این روش حدود ۱۹ مگابایت است.";
+  }
+
+  let payload: { name?: string; messages?: Array<Record<string, unknown>> };
+  try {
+    payload = JSON.parse(raw) as { name?: string; messages?: Array<Record<string, unknown>> };
+  } catch {
+    return "فایل JSON معتبر نیست. لطفاً فایل result.json اصلی Telegram Desktop را ارسال کن.";
+  }
+  if (!Array.isArray(payload.messages)) {
+    return "ساختار فایل شناخته‌شده نیست؛ فایل باید خروجی JSON از Telegram Desktop باشد.";
+  }
+
+  const chatId = session.chat_id;
+  const chatTitle = session.chat_title || payload.name || "گروه تلگرام";
+  await env.DB.prepare(
+    `INSERT INTO groups (chat_id, title, updated_at) VALUES (?, ?, datetime('now'))
+     ON CONFLICT(chat_id) DO UPDATE SET title = COALESCE(groups.title, excluded.title), updated_at = datetime('now')`,
+  ).bind(chatId, chatTitle).run();
+
+  const entries = payload.messages.filter((item) => item && item.type === "message" && item.id !== undefined);
+  let imported = 0;
+  let skipped = 0;
+  const batchSize = 80;
+
+  for (let offset = 0; offset < entries.length; offset += batchSize) {
+    const batchEntries = entries.slice(offset, offset + batchSize);
+    const statements: D1PreparedStatement[] = [];
+    for (const item of batchEntries) {
+      const messageId = String(item.id);
+      const content = Array.isArray(item.text)
+        ? item.text.map((part) => typeof part === "string" ? part : (part && typeof part === "object" && "text" in part ? String((part as {text: unknown}).text) : "")).join("")
+        : typeof item.text === "string" ? item.text : "";
+      const dateValue = typeof item.date === "string" ? item.date : null;
+      const parsedDate = dateValue ? new Date(dateValue) : null;
+      const messageDate = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate.toISOString() : null;
+      const sender = typeof item.from === "string" ? item.from : null;
+      const senderId = typeof item.from_id === "string" || typeof item.from_id === "number" ? String(item.from_id) : null;
+      const replyId = item.reply_to_message_id !== undefined && item.reply_to_message_id !== null ? String(item.reply_to_message_id) : null;
+
+      if (senderId) {
+        statements.push(env.DB.prepare(
+          `INSERT INTO users (chat_id, user_id, display_name, username) VALUES (?, ?, ?, NULL)
+           ON CONFLICT(chat_id, user_id) DO UPDATE SET display_name = COALESCE(users.display_name, excluded.display_name)`,
+        ).bind(chatId, senderId, sender));
+      }
+      statements.push(env.DB.prepare(
+        `INSERT INTO messages
+         (chat_id, telegram_message_id, user_id, message_date, text_content, reply_to_message_id, source)
+         VALUES (?, ?, ?, ?, ?, ?, 'telegram_desktop_export')
+         ON CONFLICT(chat_id, telegram_message_id) DO UPDATE SET
+           text_content = CASE WHEN messages.text_content IS NULL OR trim(messages.text_content) = '' THEN excluded.text_content ELSE messages.text_content END,
+           message_date = COALESCE(messages.message_date, excluded.message_date)`,
+      ).bind(chatId, messageId, senderId, messageDate, content || null, replyId));
+    }
+    try {
+      await env.DB.batch(statements);
+      imported += batchEntries.length;
+    } catch (error) {
+      skipped += batchEntries.length;
+      console.error("History import batch failed", error instanceof Error ? error.message : "unknown error");
+    }
+  }
+
+  await env.DB.prepare("DELETE FROM history_import_sessions WHERE user_id = ?").bind(String(message.from.id)).run();
+  return `واردسازی تاریخچه تمام شد.\\nگروه مقصد: ${chatTitle}\\nپیام‌های پردازش‌شده: ${imported}\\nبسته‌های ناموفق: ${skipped}\\n\\nاکنون می‌توانی از ربات درباره اطلاعات داخل تاریخچه سؤال کنی.`;
 }
 
 async function generateGroqAnswer(
@@ -297,28 +404,42 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     if (message.chat.type === "private") {
       await telegramApi(env, "sendMessage", {
         chat_id: message.chat.id,
-        text:
-          "برای واردکردن تاریخچه، ابتدا در خود گروه دستور /history را بفرست تا شناسه گروه را ببینی.\n" +
-          "سپس در Telegram Desktop از منوی گروه → Export chat history خروجی JSON بگیر.\n" +
-          "راهنمای کامل و دستور واردسازی در مخزن Fun_bot قرار دارد: https://github.com/tusanbot/Fun_bot#history-import",
+        text: "برای ثبت تاریخچه، اول در گروه موردنظر دستور /history را بفرست؛ سپس فایل JSON خروجی Telegram Desktop را همین‌جا برای من ارسال کن.",
       });
       return;
     }
-
+    if (!message.from) return;
+    await ensureHistoryImportTable(env);
+    await env.DB.prepare(
+      `INSERT INTO history_import_sessions (user_id, chat_id, chat_title, expires_at)
+       VALUES (?, ?, ?, datetime('now', '+30 minutes'))
+       ON CONFLICT(user_id) DO UPDATE SET chat_id = excluded.chat_id,
+         chat_title = excluded.chat_title, created_at = datetime('now'), expires_at = excluded.expires_at`,
+    ).bind(String(message.from.id), String(message.chat.id), message.chat.title ?? null).run();
     await telegramApi(env, "sendMessage", {
       chat_id: message.chat.id,
       text:
-        "ثبت تاریخچه این گروه\n" +
-        `نام گروه: ${message.chat.title ?? "بدون عنوان"}\n` +
-        `شناسه گروه: ${message.chat.id}\n\n` +
-        "۱) Telegram Desktop را باز کن و از منوی همین گروه گزینه Export chat history را بزن؛ فرمت JSON پیشنهاد می‌شود.\n" +
-        "۲) فایل را در پوشه‌ای از مخزن Fun_bot قرار بده.\n" +
-        "۳) در PowerShell، از پوشه اصلی مخزن این دستور را اجرا کن و مسیر فایل و عنوان گروه را جایگزین کن:\n\n" +
-        `python ingestion/import_to_d1.py "C:\\مسیر\\result.json" --chat-id "${message.chat.id}" --chat-title "${(message.chat.title ?? "نام گروه").replace(/"/g, "'")}" --remote\n\n` +
-        "واردسازی روی D1 اصلی انجام می‌شود؛ پیام‌های تکراری دوباره ثبت نمی‌شوند. قبل از اجرا از فایل خروجی نسخه پشتیبان نگه دار.\n" +
-        "راهنمای کامل: https://github.com/tusanbot/Fun_bot",
+        "ثبت تاریخچه گروه فعال شد.\\n" +
+        `گروه مقصد: ${message.chat.title ?? "بدون عنوان"}\\n` +
+        `شناسه گروه: ${message.chat.id}\\n\\n` +
+        "حالا در گفتگوی خصوصی با من، فایل JSON خروجی Telegram Desktop را ارسال کن. این درخواست تا ۳۰ دقیقه معتبر است.\\n" +
+        "در Telegram Desktop از منوی گروه → Export chat history → JSON استفاده کن.",
       reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
     });
+    return;
+  }
+
+  if (message.chat.type === "private" && message.document) {
+    try {
+      const result = await importTelegramExport(env, message, message.document.file_id);
+      await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: result });
+    } catch (error) {
+      console.error("Telegram history import failed", error instanceof Error ? error.message : "unknown error");
+      await telegramApi(env, "sendMessage", {
+        chat_id: message.chat.id,
+        text: "واردسازی تاریخچه انجام نشد. لطفاً مطمئن شو فایل JSON خروجی Telegram Desktop است و دوباره تلاش کن.",
+      });
+    }
     return;
   }
 
