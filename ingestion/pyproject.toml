@@ -13,3 +13,6 @@ fun-bot-import-history = "import_to_d1:main"
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.setuptools]
+py-modules = ["import_export", "import_to_d1"]
