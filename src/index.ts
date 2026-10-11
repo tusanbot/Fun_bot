@@ -187,7 +187,7 @@ async function generateGroqAnswer(
 
   // Search older messages for terms from the question, so useful facts are not
   // lost just because they are outside the recent-message window.
-  const terms = [...new Set(prompt.match(/[\\p{L}\\p{N}]{3,}/gu) ?? [])].slice(0, 8);
+  const terms = [...new Set(prompt.match(/[\p{L}\p{N}]{3,}/gu) ?? [])].slice(0, 8);
   let relevant: StoredMessage[] = [];
   if (terms.length > 0) {
     const ftsQuery = terms.map((term) => `"${term.replace(/"/g, '""')}"`).join(" OR ");
