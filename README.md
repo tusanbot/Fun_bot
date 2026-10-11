@@ -35,7 +35,7 @@ Set `TELEGRAM_BOT_TOKEN` as a Worker secret, then deploy and configure Telegram'
 ## Groq group replies
 
 - Set `GROQ_API_KEY` as a Cloudflare Worker **Secret** (never commit the key). The same key format used by the MafiaNew Groq integration works here; this bot uses Groq's chat-completions API, not the speech-to-text endpoint.
-- Optionally set `GROQ_MODEL` as a Worker variable. The default is `llama-3.3-70b-versatile`.
+- Optionally set `GROQ_MODEL` as a Worker variable. The default is `openai/gpt-oss-120b`.
 - The bot stores eligible group messages in D1 and replies only when directly mentioned or when a user replies to one of its messages. The model receives recent text history from that same chat only.
 - Telegram group privacy mode may prevent the bot from seeing regular group messages. Disable privacy mode with BotFather or grant the bot appropriate admin permissions if you intend to archive eligible group messages. Make sure group members know the retention policy.
 
