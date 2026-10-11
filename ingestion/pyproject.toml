@@ -8,6 +8,7 @@ dependencies = [
 
 [project.scripts]
 fun-bot-normalize-export = "import_export:main"
+fun-bot-import-history = "import_to_d1:main"
 
 [tool.ruff]
 line-length = 100
