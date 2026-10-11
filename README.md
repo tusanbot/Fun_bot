@@ -42,3 +42,29 @@ Set `TELEGRAM_BOT_TOKEN` as a Worker secret, then deploy and configure Telegram'
 ## Current scope
 
 This repository contains the Worker, D1 schema, history-import scaffolding, and a first Groq-powered group-answer path. Semantic search, MTProto crawling, and further production hardening remain future work.
+
+## تنظیم کلید API و واردسازی تاریخچه
+
+### ثبت کلید API
+
+- در گفتگوی خصوصی ربات دستور `/api` را بفرست؛ ربات لینک رسمی ساخت کلید Groq و مسیر تنظیم آن را نشان می‌دهد.
+- کلید را از [صفحه رسمی Groq API Keys](https://console.groq.com/keys) بساز.
+- در Cloudflare برو به **Workers & Pages → fun-bot → Settings → Variables and Secrets** و مقدار `GROQ_API_KEY` را به‌صورت **Secret** ثبت یا به‌روزرسانی کن، سپس نسخه Worker را Deploy کن.
+- کلید را برای ربات تلگرام نفرست و در GitHub یا فایل‌های مخزن قرار نده.
+
+### واردسازی تاریخچه قدیمی گروه
+
+1. در گروه تلگرام دستور `/history` را بفرست تا شناسه گروه را ببینی.
+2. در **Telegram Desktop** منوی همان گروه را باز کن و **Export chat history** را انتخاب کن. خروجی **JSON** توصیه می‌شود؛ خروجی HTML نیز پشتیبانی می‌شود. این قابلیت در برنامه دسکتاپ تلگرام است، نه نسخه وب. [راهنمای تلگرام](https://bugs.telegram.org/c/60/3)
+3. فایل خروجی را روی کامپیوتر نگه دار و مخزن `Fun_bot` را در همان کامپیوتر باز کن.
+4. در PowerShell، از پوشه اصلی مخزن وابستگی واردکننده را نصب کن:
+   ```powershell
+   py -m pip install -e ingestion
+   ```
+5. با شناسه‌ای که دستور `/history` نشان داده، واردسازی را اجرا کن. مسیر فایل و نام گروه را مطابق خروجی خودت تغییر بده:
+   ```powershell
+   py ingestion/import_to_d1.py "C:\\Users\\YourName\\Downloads\\result.json" --chat-id "-1001234567890" --chat-title "نام گروه" --remote
+   ```
+6. اسکریپت با Wrangler، پیام‌ها را دسته‌ای به دیتابیس D1 اصلی وارد می‌کند. اگر همان شناسه پیام قبلاً وجود داشته باشد، دوباره ثبت نمی‌شود و متن زنده موجود بی‌دلیل جایگزین نخواهد شد. برای آزمایش بدون تغییر دیتابیس، ابتدا `--remote` را با `--dry-run` جایگزین کن.
+
+**مهم:** پیش از اجرای واردسازی روی `--remote`، از فایل خروجی نسخه پشتیبان نگه دار و مطمئن شو شناسه گروه درست است. پیام‌های بدون متن (مثل بعضی عکس‌ها و فایل‌ها) برای جست‌وجوی متنی مفید نیستند؛ متن و کپشن‌های موجود وارد می‌شوند. پیام‌های واردشده در دیتابیس همان گروه ذخیره می‌شوند و تاریخچه گروه‌های دیگر به آن اضافه نمی‌شود.
