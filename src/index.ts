@@ -219,7 +219,14 @@ async function processAdminPrivateMessage(env: Env, message: TelegramMessage): P
     .bind(String(message.from.id)).first<{action:string}>();
   if (!session) return false;
   const input = (message.text ?? message.caption ?? "").trim();
-  if (!input) return false;
+  if (!input || input.startsWith("/")) {
+    if (input === "/cancel") {
+      await env.DB.prepare("DELETE FROM admin_sessions WHERE user_id=?").bind(String(message.from.id)).run();
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"عملیات لغو شد."});
+      return true;
+    }
+    return false;
+  }
   if (session.action === "set_channel") {
     await setSetting(env,"required_channel",input.replace(/^https?:\/\/(www\.)?t\.me\//,"").replace(/\/$/,""));
     await env.DB.prepare("DELETE FROM admin_sessions WHERE user_id=?").bind(String(message.from.id)).run();
@@ -397,6 +404,7 @@ async function importTelegramExport(
   env: Env,
   message: TelegramMessage,
   fileId: string,
+  fileName = "result.json",
 ): Promise<string> {
   if (!message.from) throw new Error("Telegram sender is unavailable");
   await ensureHistoryImportTable(env);
@@ -409,8 +417,9 @@ async function importTelegramExport(
   }
 
   const file = await telegramApi<{ file_path?: string }>(env, "getFile", { file_id: fileId });
-  if (!file.file_path || !/\.(json)$/i.test(file.file_path)) {
-    return "فعلاً فقط فایل JSON خروجی Telegram Desktop پشتیبانی می‌شود. هنگام خروجی گرفتن، فرمت JSON را انتخاب کن.";
+  const extension = (fileName || file.file_path || "").split(".").pop()?.toLowerCase() ?? "";
+  if (!file.file_path || !["json","html","htm","txt"].includes(extension)) {
+    return "فرمت پشتیبانی‌شده: JSON، HTML یا TXT. فایل را از Telegram Desktop خروجی بگیر.";
   }
   const download = await fetch(
     `https://api.telegram.org/file/bot${env.TELEGRAM_BOT_TOKEN}/${file.file_path}`,
@@ -422,13 +431,32 @@ async function importTelegramExport(
   }
 
   let payload: { name?: string; messages?: Array<Record<string, unknown>> };
-  try {
-    payload = JSON.parse(raw) as { name?: string; messages?: Array<Record<string, unknown>> };
-  } catch {
-    return "فایل JSON معتبر نیست. لطفاً فایل result.json اصلی Telegram Desktop را ارسال کن.";
-  }
-  if (!Array.isArray(payload.messages)) {
-    return "ساختار فایل شناخته‌شده نیست؛ فایل باید خروجی JSON از Telegram Desktop باشد.";
+  if (extension === "json") {
+    try { payload = JSON.parse(raw) as { name?: string; messages?: Array<Record<string, unknown>> }; }
+    catch { return "فایل JSON معتبر نیست. لطفاً خروجی Telegram Desktop را بررسی کن."; }
+    if (!Array.isArray(payload.messages)) return "ساختار فایل JSON شناخته‌شده نیست.";
+  } else if (extension === "html" || extension === "htm") {
+    const decode = (value: string) => value.replace(/<br\s*\/?\s*>/gi,"\n").replace(/<[^>]+>/g," ")
+      .replace(/&nbsp;/g," ").replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+      .replace(/&quot;/g,'"').replace(/&#39;|&apos;/g,"'").replace(/&#(\d+);/g,(_,n)=>String.fromCodePoint(Number(n)))
+      .replace(/\s+/g," ").trim();
+    const messages: Array<Record<string,unknown>> = [];
+    const re = /<div class="message[^"]*" id="message(\d+)"[^>]*>([\s\S]*?)(?=<div class="message[^"]*" id="message\d+"|$)/gi;
+    let match: RegExpExecArray | null;
+    while ((match = re.exec(raw)) !== null) {
+      const block = match[2];
+      const textMatch = block.match(/<div class="text[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+      const fromMatch = block.match(/<div class="from_name"[^>]*>([\s\S]*?)<\/div>/i);
+      const dateMatch = block.match(/class="pull_right date details"[^>]*title="([^"]+)"/i);
+      const content = textMatch ? decode(textMatch[1]) : "";
+      if (!content) continue;
+      messages.push({id:match[1],type:"message",text:content,from:fromMatch ? decode(fromMatch[1]) : "عضو",date:dateMatch?.[1] ?? null});
+    }
+    if (!messages.length) return "در فایل HTML پیام متنی قابل واردسازی پیدا نشد؛ از خروجی استاندارد Telegram Desktop استفاده کن.";
+    payload = {name:"Telegram HTML export",messages};
+  } else {
+    const lines = raw.split(/\r?\n/).map(line=>line.trim()).filter(Boolean);
+    payload = {name:"Text import",messages:lines.map((text,index)=>({id:`txt_${message.message_id}_${index}`,type:"message",text,date:new Date().toISOString(),from:"متن واردشده"}))};
   }
 
   const chatId = session.chat_id;
@@ -729,12 +757,12 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: "فایل بیش از ۱۹ مگابایت است؛ لطفاً تاریخچه را در بخش‌های کوچک‌تر خروجی بگیر." });
       return;
     }
-    if (message.document.file_name && !message.document.file_name.toLowerCase().endsWith(".json")) {
-      await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: "لطفاً فایل JSON خروجی Telegram Desktop را ارسال کن." });
+    if (message.document.file_name && !/\.(json|html?|txt)$/i.test(message.document.file_name)) {
+      await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: "فرمت‌های پشتیبانی‌شده: JSON، HTML و TXT." });
       return;
     }
     try {
-      const result = await importTelegramExport(env, message, message.document.file_id);
+      const result = await importTelegramExport(env, message, message.document.file_id, message.document.file_name ?? "result.json");
       await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: result });
     } catch (error) {
       console.error("Telegram history import failed", error instanceof Error ? error.message : "unknown error");
