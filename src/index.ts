@@ -180,7 +180,7 @@ async function importTelegramExport(
   }
 
   const file = await telegramApi<{ file_path?: string }>(env, "getFile", { file_id: fileId });
-  if (!file.file_path || !/\\.(json)$/i.test(file.file_path)) {
+  if (!file.file_path || !/\.(json)$/i.test(file.file_path)) {
     return "فعلاً فقط فایل JSON خروجی Telegram Desktop پشتیبانی می‌شود. هنگام خروجی گرفتن، فرمت JSON را انتخاب کن.";
   }
   const download = await fetch(
@@ -254,7 +254,7 @@ async function importTelegramExport(
   }
 
   await env.DB.prepare("DELETE FROM history_import_sessions WHERE user_id = ?").bind(String(message.from.id)).run();
-  return `واردسازی تاریخچه تمام شد.\\nگروه مقصد: ${chatTitle}\\nپیام‌های پردازش‌شده: ${imported}\\nبسته‌های ناموفق: ${skipped}\\n\\nاکنون می‌توانی از ربات درباره اطلاعات داخل تاریخچه سؤال کنی.`;
+  return `واردسازی تاریخچه تمام شد.\nگروه مقصد: ${chatTitle}\nپیام‌های پردازش‌شده: ${imported}\nبسته‌های ناموفق: ${skipped}\n\nاکنون می‌توانی از ربات درباره اطلاعات داخل تاریخچه سؤال کنی.`;
 }
 
 async function generateGroqAnswer(
@@ -419,10 +419,10 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     await telegramApi(env, "sendMessage", {
       chat_id: message.chat.id,
       text:
-        "ثبت تاریخچه گروه فعال شد.\\n" +
-        `گروه مقصد: ${message.chat.title ?? "بدون عنوان"}\\n` +
-        `شناسه گروه: ${message.chat.id}\\n\\n` +
-        "حالا در گفتگوی خصوصی با من، فایل JSON خروجی Telegram Desktop را ارسال کن. این درخواست تا ۳۰ دقیقه معتبر است.\\n" +
+        "ثبت تاریخچه گروه فعال شد.\n" +
+        `گروه مقصد: ${message.chat.title ?? "بدون عنوان"}\n` +
+        `شناسه گروه: ${message.chat.id}\n\n` +
+        "حالا در گفتگوی خصوصی با من، فایل JSON خروجی Telegram Desktop را ارسال کن. این درخواست تا ۳۰ دقیقه معتبر است.\n" +
         "در Telegram Desktop از منوی گروه → Export chat history → JSON استفاده کن.",
       reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
     });
