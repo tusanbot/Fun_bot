@@ -30,6 +30,8 @@ A Telegram group-memory bot, built with a Cloudflare-first architecture.
 
 Set `TELEGRAM_BOT_TOKEN` as a Worker secret, then deploy and configure Telegram's webhook to point to the deployed Worker URL plus `/webhook`. Set `BOT_USERNAME` as a regular Worker variable (without the leading @).
 
+**Important:** Telegram's default group privacy mode prevents bots from receiving most ordinary group messages. To archive all eligible group messages, disable privacy mode for the bot through BotFather or make the bot an administrator with appropriate permissions. Confirm group members understand the message-retention policy before enabling collection.
+
 ## Current scope
 
 This repository contains the initial Worker, D1 schema, and history-import scaffolding. AI answering, semantic search, MTProto crawling, and production hardening are subsequent milestones.
