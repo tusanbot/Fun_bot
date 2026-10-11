@@ -63,7 +63,7 @@ This repository contains the Worker, D1 schema, history-import scaffolding, and 
    ```
 5. با شناسه‌ای که دستور `/history` نشان داده، واردسازی را اجرا کن. مسیر فایل و نام گروه را مطابق خروجی خودت تغییر بده:
    ```powershell
-   py ingestion/import_to_d1.py "C:\\Users\\YourName\\Downloads\\result.json" --chat-id "-1001234567890" --chat-title "نام گروه" --remote
+   py ingestion/import_to_d1.py "C:\Users\YourName\Downloads\result.json" --chat-id "-1001234567890" --chat-title "نام گروه" --remote
    ```
 6. اسکریپت با Wrangler، پیام‌ها را دسته‌ای به دیتابیس D1 اصلی وارد می‌کند. اگر همان شناسه پیام قبلاً وجود داشته باشد، دوباره ثبت نمی‌شود و متن زنده موجود بی‌دلیل جایگزین نخواهد شد. برای آزمایش بدون تغییر دیتابیس، ابتدا `--remote` را با `--dry-run` جایگزین کن.
 
