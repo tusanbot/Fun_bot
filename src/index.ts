@@ -469,11 +469,13 @@ async function importTelegramExport(
   const entries = payload.messages.filter((item) => item && item.type === "message" && item.id !== undefined);
   let imported = 0;
   let skipped = 0;
+  let duplicates = 0;
   const batchSize = 40;
 
   for (let offset = 0; offset < entries.length; offset += batchSize) {
     const batchEntries = entries.slice(offset, offset + batchSize);
     const statements: D1PreparedStatement[] = [];
+    const messageStatementIndexes: number[] = [];
     for (const item of batchEntries) {
       const messageId = String(item.id);
       const content = Array.isArray(item.text)
@@ -492,6 +494,7 @@ async function importTelegramExport(
            ON CONFLICT(chat_id, user_id) DO UPDATE SET display_name = COALESCE(users.display_name, excluded.display_name)`,
         ).bind(chatId, senderId, sender));
       }
+      messageStatementIndexes.push(statements.length);
       statements.push(env.DB.prepare(
         `INSERT INTO messages
          (chat_id, telegram_message_id, user_id, message_date, text_content, reply_to_message_id, source)
@@ -502,15 +505,18 @@ async function importTelegramExport(
       ).bind(chatId, messageId, senderId, messageDate, content || null, replyId));
     }
     try {
-      await env.DB.batch(statements);
-      imported += batchEntries.length;
+      const results = await env.DB.batch(statements);
+      let insertedThisBatch = 0;
+      for (const index of messageStatementIndexes) insertedThisBatch += results[index]?.meta?.changes ?? 0;
+      imported += insertedThisBatch;
+      duplicates += Math.max(0, batchEntries.length - insertedThisBatch);
     } catch (error) {
       skipped += batchEntries.length;
       console.error("History import batch failed", error instanceof Error ? error.message : "unknown error");
     }
   }
 
-  return `واردسازی تاریخچه تمام شد.\nگروه مقصد: ${chatTitle}\nپیام‌های پردازش‌شده: ${imported}\nبسته‌های ناموفق: ${skipped}\n\nاکنون می‌توانی از ربات درباره اطلاعات داخل تاریخچه سؤال کنی.`;
+  return `واردسازی تاریخچه تمام شد.\nگروه مقصد: ${chatTitle}\nپیام‌های جدید ثبت‌شده: ${imported}\nموارد تکراری/بدون تغییر: ${duplicates}\nپیام‌های داخل بسته‌های ناموفق: ${skipped}\n\nاکنون می‌توانی از ربات درباره اطلاعات داخل تاریخچه سؤال کنی.`;
 }
 
 async function generateGroqAnswer(
