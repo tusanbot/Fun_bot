@@ -482,7 +482,6 @@ async function importTelegramExport(
     }
   }
 
-  await env.DB.prepare("DELETE FROM history_import_sessions WHERE user_id = ?").bind(String(message.from.id)).run();
   return `واردسازی تاریخچه تمام شد.\nگروه مقصد: ${chatTitle}\nپیام‌های پردازش‌شده: ${imported}\nبسته‌های ناموفق: ${skipped}\n\nاکنون می‌توانی از ربات درباره اطلاعات داخل تاریخچه سؤال کنی.`;
 }
 
@@ -596,19 +595,44 @@ async function generateGroqAnswer(
 }
 
 async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
+  if (update.callback_query) {
+    const query = update.callback_query;
+    if (query.data === "check_membership") {
+      const channel = await getSetting(env, "required_channel");
+      let ok = false;
+      try {
+        const member = channel ? await telegramApi<{status:string;is_member?:boolean}>(env, "getChatMember", {chat_id:channel,user_id:query.from.id}) : null;
+        ok = !!member && (["creator","administrator","member"].includes(member.status) || (member.status === "restricted" && member.is_member === true));
+      } catch {}
+      await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:ok ? "عضویت تأیید شد؛ حالا دوباره پیام بده." : "هنوز عضویت شما تأیید نشد.",show_alert:!ok});
+      return;
+    }
+    await handleCallback(env, query);
+    return;
+  }
   const message = update.message ?? update.edited_message;
   if (!message || message.from?.is_bot) return;
+  if (message.chat.type === "private" && message.from && await processAdminPrivateMessage(env, message)) return;
 
   const rawText = message.text ?? message.caption ?? "";
   const command = rawText.trim().split(/\s+/, 1)[0].split("@")[0].toLowerCase();
   if (command === "/start") {
     const welcome =
-      "سلام! 👋\n\nمن سخنگو هستم؛ پیام‌های گروه را برای درک گفتگو ذخیره می‌کنم و با کمک هوش مصنوعی Groq پاسخ می‌دهم.\n" +
-      "در گروه من را منشن کن یا به یکی از پیام‌هایم ریپلای بزن تا پاسخ بدهم.";
+      "سلام! 👋\n\nمن ربات حافظه گروه هستم؛ پیام‌های گروه‌های تأییدشده را برای جست‌وجو ذخیره می‌کنم و فقط با منشن یا ریپلای پاسخ می‌دهم.\n" +
+      "مدیر ربات می‌تواند در پیوی دستور /manage را برای باز کردن پنل مدیریت بفرستد.";
     await telegramApi(env, "sendMessage", {
       chat_id: message.chat.id,
       text: welcome,
     });
+    return;
+  }
+
+  if (command === "/manage" || command === "/panel") {
+    if (message.chat.type !== "private" || !message.from || !isAdmin(env, message.from.id)) {
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"این بخش فقط در گفتگوی خصوصی و برای مدیر مجاز در دسترس است."});
+      return;
+    }
+    await showAdminPanel(env,message.chat.id);
     return;
   }
 
@@ -629,11 +653,11 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     return;
   }
 
-  if (command === "/history") {
+  if (command === "/history" || command === "/history_text") {
     if (message.chat.type === "private") {
       await telegramApi(env, "sendMessage", {
         chat_id: message.chat.id,
-        text: "برای ثبت تاریخچه، اول در گروه موردنظر دستور /history را بفرست؛ سپس فایل JSON خروجی Telegram Desktop را همین‌جا برای من ارسال کن.",
+        text: "برای ثبت تاریخچه، اول در گروه مقصد دستور /history را بفرست؛ سپس می‌توانی چند فایل JSON یا متن ساده را همین‌جا ارسال کنی. برای HTML از خروجی Telegram Desktop استفاده کن.",
       });
       return;
     }
@@ -669,11 +693,11 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     await telegramApi(env, "sendMessage", {
       chat_id: message.chat.id,
       text:
-        "ثبت تاریخچه گروه فعال شد.\n" +
+        "درخواست ثبت تاریخچه آماده شد.\n" +
         `گروه مقصد: ${message.chat.title ?? "بدون عنوان"}\n` +
         `شناسه گروه: ${message.chat.id}\n\n` +
-        "حالا در گفتگوی خصوصی با من، فایل JSON خروجی Telegram Desktop را ارسال کن. این درخواست تا ۳۰ دقیقه معتبر است.\n" +
-        "در Telegram Desktop از منوی گروه → Export chat history → JSON استفاده کن.",
+        "پس از تأیید گروه توسط مدیر ربات، در پیوی چند فایل JSON خروجی Telegram Desktop یا متن ساده (هر پیام در یک خط) بفرست. درخواست تا ۳۰ دقیقه معتبر است.\n" +
+        "در Telegram Desktop از منوی گروه → Export chat history استفاده کن.",
       reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
     });
     return;
@@ -701,8 +725,39 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     return;
   }
 
+  if (message.chat.type === "private" && message.text && message.from) {
+    const historySession = await env.DB.prepare("SELECT chat_id,chat_title FROM history_import_sessions WHERE user_id=? AND expires_at>datetime('now')")
+      .bind(String(message.from.id)).first<{chat_id:string;chat_title:string|null}>();
+    if (historySession && !message.text.trim().startsWith("/")) {
+      const lines = message.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 1000);
+      let inserted = 0, failed = 0;
+      for (let i=0;i<lines.length;i+=40) {
+        const batch = lines.slice(i,i+40);
+        const statements = batch.map((line,j) => {
+          const pseudoId = `manual_${message.message_id}_${i+j}`;
+          return env.DB.prepare(`INSERT INTO messages(chat_id,telegram_message_id,user_id,message_date,text_content,source)
+            VALUES(?,?,?,?,?,'manual_text') ON CONFLICT(chat_id,telegram_message_id) DO NOTHING`)
+            .bind(historySession.chat_id,pseudoId,String(message.from!.id),new Date().toISOString(),line.slice(0,4000));
+        });
+        try { await env.DB.batch(statements); inserted += batch.length; } catch { failed += batch.length; }
+      }
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:`ثبت متن تاریخچه انجام شد.\nگروه مقصد: ${historySession.chat_title ?? historySession.chat_id}\nخطوط پردازش‌شده: ${lines.length}\nخطوط ناموفق در بسته‌ها: ${failed}\nتوجه: شناسه‌های تکراری ثبت نمی‌شوند.`});
+      return;
+    }
+  }
   if (message.chat.type === "private") return;
 
+  if (message.new_chat_members?.some((member) => member.username?.toLowerCase() === env.BOT_USERNAME.replace(/^@/,"").toLowerCase())) {
+    await notifyGroupPending(env,message);
+    return;
+  }
+  const knownGroup = await env.DB.prepare("SELECT approved,enabled FROM groups WHERE chat_id=?")
+    .bind(String(message.chat.id)).first<{approved:number;enabled:number}>();
+  if (!knownGroup || !knownGroup.approved || !knownGroup.enabled) {
+    if (!knownGroup) await notifyGroupPending(env,message);
+    return;
+  }
+  if (!await checkRequiredMembership(env,message)) return;
   await saveMessage(env, message);
   if (!isExplicitlyAddressed(message, env.BOT_USERNAME)) return;
 
