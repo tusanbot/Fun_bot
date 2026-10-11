@@ -128,12 +128,27 @@ async function saveMessage(env: Env, message: TelegramMessage): Promise<void> {
 
 async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   const message = update.message ?? update.edited_message;
-  if (!message || message.chat.type === "private") return;
+  if (!message) return;
+
+  // Handle /start in private chats and groups before filtering private messages.
+  const command = (message.text ?? "").trim().split(/\\s+/, 1)[0].split("@")[0];
+  if (command === "/start") {
+    const welcome =
+      "سلام! 👋\n\nمن سخنگو هستم و روی زیرساخت جدید در حال راه‌اندازی‌ام.\n" +
+      "در حال حاضر پاسخ‌گویی هوشمند هنوز فعال نشده است؛ این پیام فقط تأیید می‌کند که ربات و وب‌هوک درست کار می‌کنند.";
+    await telegramApi(env, "sendMessage", {
+      chat_id: message.chat.id,
+      text: welcome,
+    });
+    return;
+  }
+
+  if (message.chat.type === "private") return;
 
   await saveMessage(env, message);
 
   // AI retrieval/answer generation is added in a later milestone.
-  // Do not respond to ordinary group messages.
+  // Do not respond to ordinary group messages until that feature is implemented.
   if (!isExplicitlyAddressed(message, env.BOT_USERNAME)) return;
 }
 
