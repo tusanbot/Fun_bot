@@ -1,0 +1,14 @@
+[project]
+name = "fun-bot-history-importer"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "beautifulsoup4>=4.12,<5",
+]
+
+[project.scripts]
+fun-bot-normalize-export = "import_export:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
