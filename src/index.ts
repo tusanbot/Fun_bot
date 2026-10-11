@@ -471,7 +471,7 @@ async function importTelegramExport(
      ON CONFLICT(chat_id) DO UPDATE SET title = COALESCE(groups.title, excluded.title), updated_at = datetime('now')`,
   ).bind(chatId, chatTitle).run();
 
-  const entries = payload.messages.filter((item) => item && item.type === "message" && item.id !== undefined);
+  const entries = (payload.messages ?? []).filter((item) => item && item.type === "message" && item.id !== undefined);
   let imported = 0;
   let skipped = 0;
   let duplicates = 0;
