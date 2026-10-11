@@ -63,12 +63,13 @@ async function telegramApi<T>(
 }
 
 function isExplicitlyAddressed(message: TelegramMessage, botUsername: string): boolean {
-  if (message.reply_to_message?.from?.is_bot) return true;
+  const normalizedUsername = botUsername.replace(/^@/, "").toLowerCase();
+  const repliedBotUsername = message.reply_to_message?.from?.username?.toLowerCase();
+  if (repliedBotUsername && repliedBotUsername === normalizedUsername) return true;
 
   const text = message.text ?? message.caption ?? "";
   if (!text || !botUsername) return false;
 
-  const normalizedUsername = botUsername.replace(/^@/, "").toLowerCase();
   const entities = (message as TelegramMessage & {
     entities?: Array<{ type: string; offset: number; length: number; user?: TelegramUser }>;
     caption_entities?: Array<{ type: string; offset: number; length: number; user?: TelegramUser }>;
