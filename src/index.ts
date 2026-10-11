@@ -149,6 +149,11 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
   if (data === "manage_groups") return showGroups(env, query.from.id, chatId);
   if (data === "manage_keys") return showKeys(env, chatId);
   if (data === "toggle_membership") {
+    const channel = await getSetting(env,"required_channel");
+    if (!channel) {
+      await telegramApi(env,"sendMessage",{chat_id:chatId,text:"اول از بخش «تنظیم کانال عضویت» یک کانال عمومی را تنظیم کن؛ سپس می‌توانی عضویت اجباری را روشن کنی."});
+      return;
+    }
     const current = (await getSetting(env,"membership_required")) === "1";
     await setSetting(env,"membership_required",current ? "0" : "1");
     return showAdminPanel(env,chatId);
@@ -671,6 +676,19 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
 
   const rawText = message.text ?? message.caption ?? "";
   const command = rawText.trim().split(/\s+/, 1)[0].split("@")[0].toLowerCase();
+  if (message.chat.type !== "private") {
+    if (message.new_chat_members?.some((member) => member.username?.toLowerCase() === env.BOT_USERNAME.replace(/^@/,"").toLowerCase())) {
+      await notifyGroupPending(env,message);
+      return;
+    }
+    const approved = await env.DB.prepare("SELECT approved,enabled FROM groups WHERE chat_id=?")
+      .bind(String(message.chat.id)).first<{approved:number;enabled:number}>();
+    if (!approved || !approved.approved || !approved.enabled) {
+      if (!approved) await notifyGroupPending(env,message);
+      return;
+    }
+    if (!await checkRequiredMembership(env,message)) return;
+  }
   if (command === "/start") {
     const welcome =
       "سلام! 👋\n\nمن ربات حافظه گروه هستم؛ پیام‌های گروه‌های تأییدشده را برای جست‌وجو ذخیره می‌کنم و فقط با منشن یا ریپلای پاسخ می‌دهم.\n" +
@@ -808,17 +826,6 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   }
   if (message.chat.type === "private") return;
 
-  if (message.new_chat_members?.some((member) => member.username?.toLowerCase() === env.BOT_USERNAME.replace(/^@/,"").toLowerCase())) {
-    await notifyGroupPending(env,message);
-    return;
-  }
-  const knownGroup = await env.DB.prepare("SELECT approved,enabled FROM groups WHERE chat_id=?")
-    .bind(String(message.chat.id)).first<{approved:number;enabled:number}>();
-  if (!knownGroup || !knownGroup.approved || !knownGroup.enabled) {
-    if (!knownGroup) await notifyGroupPending(env,message);
-    return;
-  }
-  if (!await checkRequiredMembership(env,message)) return;
   await saveMessage(env, message);
   if (!isExplicitlyAddressed(message, env.BOT_USERNAME)) return;
 
