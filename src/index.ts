@@ -738,6 +738,12 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       });
       return;
     }
+    const approvedGroup = await env.DB.prepare("SELECT approved,enabled FROM groups WHERE chat_id=?")
+      .bind(String(message.chat.id)).first<{approved:number;enabled:number}>();
+    if (!approvedGroup || !approvedGroup.approved || !approvedGroup.enabled) {
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"این گروه هنوز توسط مدیر ربات تأیید نشده است؛ پس از تأیید، واردسازی تاریخچه فعال می‌شود.",reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});
+      return;
+    }
     await ensureHistoryImportTable(env);
     await env.DB.prepare(
       `INSERT INTO history_import_sessions (user_id, chat_id, chat_title, expires_at)
@@ -841,9 +847,7 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     console.error("Failed to generate group answer", error instanceof Error ? error.message : "unknown error");
     await telegramApi(env, "sendMessage", {
       chat_id: message.chat.id,
-      text: env.GROQ_API_KEY
-        ? "الان نتونستم پاسخ رو آماده کنم؛ لطفاً کمی بعد دوباره امتحان کن."
-        : "برای فعال شدن پاسخ‌گویی هوشمند، مدیر ربات باید GROQ_API_KEY را در Secrets کلادفلر تنظیم کند.",
+      text: "الان نتونستم پاسخ رو آماده کنم؛ مدیر ربات می‌تواند در پیوی /manage را باز کند و کلید سالم xAI/Grok ثبت یا اعتبارسنجی کند.",
       reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
     });
   }
