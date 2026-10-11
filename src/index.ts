@@ -5,6 +5,10 @@ interface Env {
   BOT_USERNAME: string;
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
+  XAI_API_KEY?: string;
+  XAI_MODEL?: string;
+  ADMIN_USER_IDS?: string;
+  KEY_ENCRYPTION_SECRET?: string;
 }
 
 interface TelegramUser {
@@ -43,11 +47,236 @@ interface TelegramMessage {
     from?: TelegramUser;
     text?: string;
   };
+  new_chat_members?: TelegramUser[];
 }
 
+interface TelegramCallbackQuery {
+  id: string;
+  from: TelegramUser;
+  data?: string;
+  message?: TelegramMessage;
+}
 interface TelegramUpdate {
   message?: TelegramMessage;
   edited_message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
+}
+
+
+function isAdmin(env: Env, userId: number | string): boolean {
+  const allowed = (env.ADMIN_USER_IDS ?? "").split(",").map((v) => v.trim()).filter(Boolean);
+  return allowed.includes(String(userId));
+}
+async function getSetting(env: Env, key: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT setting_value FROM bot_settings WHERE setting_key = ?")
+    .bind(key).first<{ setting_value: string }>();
+  return row?.setting_value ?? null;
+}
+async function setSetting(env: Env, key: string, value: string): Promise<void> {
+  await env.DB.prepare(`INSERT INTO bot_settings(setting_key, setting_value, updated_at)
+    VALUES (?, ?, datetime('now')) ON CONFLICT(setting_key) DO UPDATE SET
+    setting_value=excluded.setting_value, updated_at=datetime('now')`).bind(key, value).run();
+}
+async function encryptApiKey(env: Env, value: string): Promise<string> {
+  if (!env.KEY_ENCRYPTION_SECRET || env.KEY_ENCRYPTION_SECRET.length < 32) {
+    throw new Error("KEY_ENCRYPTION_SECRET must be configured as a Worker secret (32+ characters)");
+  }
+  const material = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.KEY_ENCRYPTION_SECRET));
+  const key = await crypto.subtle.importKey("raw", material, "AES-GCM", false, ["encrypt"]);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, new TextEncoder().encode(value));
+  const bytes = new Uint8Array(iv.length + cipher.byteLength);
+  bytes.set(iv, 0); bytes.set(new Uint8Array(cipher), iv.length);
+  return btoa(String.fromCharCode(...bytes));
+}
+async function decryptApiKey(env: Env, encoded: string): Promise<string> {
+  if (!env.KEY_ENCRYPTION_SECRET || env.KEY_ENCRYPTION_SECRET.length < 32) throw new Error("Key encryption secret is not configured");
+  const bytes = Uint8Array.from(atob(encoded), (c) => c.charCodeAt(0));
+  const material = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(env.KEY_ENCRYPTION_SECRET));
+  const key = await crypto.subtle.importKey("raw", material, "AES-GCM", false, ["decrypt"]);
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: bytes.slice(0, 12) }, key, bytes.slice(12));
+  return new TextDecoder().decode(plain);
+}
+async function answerMarkup(env: Env) {
+  const enabled = (await getSetting(env, "membership_required")) === "1";
+  const channel = await getSetting(env, "required_channel");
+  return { inline_keyboard: [
+    [{ text: "مدیریت گروه‌ها", callback_data: "manage_groups" }, { text: "مدیریت کلیدهای AI", callback_data: "manage_keys" }],
+    [{ text: `عضویت اجباری: ${enabled ? "روشن" : "خاموش"}`, callback_data: "toggle_membership" }],
+    [{ text: "تنظیم کانال عضویت", callback_data: "set_channel" }],
+    [{ text: "راهنمای دریافت کلید xAI / Grok", url: "https://console.x.ai/" }],
+  ] };
+}
+async function showAdminPanel(env: Env, chatId: number): Promise<void> {
+  const markup = await answerMarkup(env);
+  await telegramApi(env, "sendMessage", { chat_id: chatId, text:
+    "پنل مدیریت ربات حافظه گروه\n\nاز این بخش می‌توانی گروه‌ها، کلیدهای API و عضویت اجباری را مدیریت کنی.\n" +
+    "برای مدیریت کلیدها، ابتدا KEY_ENCRYPTION_SECRET را در Cloudflare به‌صورت Secret تنظیم کن.",
+    reply_markup: markup });
+}
+async function showGroups(env: Env, userId: number, chatId: number): Promise<void> {
+  const rows = await env.DB.prepare("SELECT chat_id,title,approved,enabled FROM groups ORDER BY updated_at DESC LIMIT 30")
+    .all<{chat_id:string;title:string|null;approved:number;enabled:number}>();
+  const buttons: Array<Array<{text:string;callback_data:string}>> = [];
+  for (const row of rows.results ?? []) {
+    buttons.push([{ text: `${row.approved ? "✅" : "⏳"} ${(row.title || row.chat_id).slice(0,35)}`, callback_data: `group_detail:${row.chat_id}` }]);
+  }
+  buttons.push([{text:"بازگشت",callback_data:"manage_home"}]);
+  await telegramApi(env,"sendMessage",{chat_id:chatId,text:"گروه‌ها (حداکثر ۳۰ مورد اخیر):",reply_markup:{inline_keyboard:buttons}});
+}
+async function showKeys(env: Env, chatId: number): Promise<void> {
+  const rows = await env.DB.prepare("SELECT id,label,provider,enabled,last_status FROM api_keys ORDER BY id DESC")
+    .all<{id:number;label:string;provider:string;enabled:number;last_status:string}>();
+  const buttons: Array<Array<{text:string;callback_data:string}>> = [
+    [{text:"➕ افزودن کلید xAI / Grok",callback_data:"key_add"}],
+  ];
+  for (const row of rows.results ?? []) {
+    buttons.push([{text:`#${row.id} ${row.label} — ${row.enabled ? "فعال" : "غیرفعال"} (${row.last_status})`,callback_data:`key_detail:${row.id}`}]);
+  }
+  buttons.push([{text:"بازگشت",callback_data:"manage_home"}]);
+  await telegramApi(env,"sendMessage",{chat_id:chatId,text:"مدیریت کلیدهای API. مقدار واقعی کلیدها هرگز نمایش داده نمی‌شود.",reply_markup:{inline_keyboard:buttons}});
+}
+async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<void> {
+  const data = query.data ?? "";
+  const actor = String(query.from.id);
+  if (!isAdmin(env, actor)) {
+    await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"دسترسی مدیر لازم است.",show_alert:true});
+    return;
+  }
+  await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id});
+  const chatId = query.message?.chat.id ?? query.from.id;
+  if (data === "manage_home") return showAdminPanel(env, chatId);
+  if (data === "manage_groups") return showGroups(env, query.from.id, chatId);
+  if (data === "manage_keys") return showKeys(env, chatId);
+  if (data === "toggle_membership") {
+    const current = (await getSetting(env,"membership_required")) === "1";
+    await setSetting(env,"membership_required",current ? "0" : "1");
+    return showAdminPanel(env,chatId);
+  }
+  if (data === "set_channel") {
+    await env.DB.prepare(`INSERT INTO admin_sessions(user_id,action,expires_at) VALUES (?,'set_channel',datetime('now','+10 minutes'))
+      ON CONFLICT(user_id) DO UPDATE SET action='set_channel',created_at=datetime('now'),expires_at=datetime('now','+10 minutes')`).bind(actor).run();
+    return telegramApi(env,"sendMessage",{chat_id:chatId,text:"شناسه یا نام کاربری کانال را بفرست (مثلاً @my_channel). ربات باید عضو کانال باشد و برای بررسی عضویت دسترسی لازم داشته باشد."}).then(()=>undefined);
+  }
+  if (data === "key_add") {
+    await env.DB.prepare(`INSERT INTO admin_sessions(user_id,action,expires_at) VALUES (?,'add_xai_key',datetime('now','+10 minutes'))
+      ON CONFLICT(user_id) DO UPDATE SET action='add_xai_key',created_at=datetime('now'),expires_at=datetime('now','+10 minutes')`).bind(actor).run();
+    await telegramApi(env,"sendMessage",{chat_id:chatId,text:"از صفحه رسمی https://console.x.ai/ یک کلید بساز و همین‌جا در پیوی ارسال کن. کلید رمزگذاری‌شده ذخیره می‌شود و پیام ورودی بلافاصله برای حذف تلاش می‌شود. کلید را در گروه نفرست."});
+    return;
+  }
+  if (data.startsWith("group_detail:")) {
+    const groupId = data.slice("group_detail:".length);
+    const row = await env.DB.prepare("SELECT chat_id,title,approved,enabled FROM groups WHERE chat_id=?").bind(groupId).first<{chat_id:string;title:string|null;approved:number;enabled:number}>();
+    if (!row) return telegramApi(env,"sendMessage",{chat_id:chatId,text:"گروه پیدا نشد."}).then(()=>undefined);
+    const buttons = [[{text:row.approved ? "رد تأیید / غیرفعال‌سازی" : "تأیید گروه",callback_data:`admin_approve:${groupId}:${row.approved ? "0" : "1"}`}],[{text:"بازگشت به گروه‌ها",callback_data:"manage_groups"}]];
+    return telegramApi(env,"sendMessage",{chat_id:chatId,text:`گروه: ${row.title ?? "بدون عنوان"}\nشناسه: ${row.chat_id}\nوضعیت: ${row.approved ? "تأیید شده" : "در انتظار تأیید"}`,reply_markup:{inline_keyboard:buttons}}).then(()=>undefined);
+  }
+  if (data.startsWith("admin_approve:")) {
+    const [,groupId,state] = data.split(":");
+    await env.DB.prepare("UPDATE groups SET approved=?,enabled=?,updated_at=datetime('now') WHERE chat_id=?")
+      .bind(state === "1" ? 1 : 0,state === "1" ? 1 : 0,groupId).run();
+    await telegramApi(env,"sendMessage",{chat_id:chatId,text:state === "1" ? `گروه ${groupId} تأیید شد.` : `گروه ${groupId} غیرفعال شد.`});
+    return;
+  }
+  if (data.startsWith("key_detail:")) {
+    const id = Number(data.slice("key_detail:".length));
+    const row = await env.DB.prepare("SELECT id,label,enabled,last_status,last_error FROM api_keys WHERE id=?").bind(id).first<{id:number;label:string;enabled:number;last_status:string;last_error:string|null}>();
+    if (!row) return telegramApi(env,"sendMessage",{chat_id:chatId,text:"کلید پیدا نشد."}).then(()=>undefined);
+    return telegramApi(env,"sendMessage",{chat_id:chatId,text:`کلید #${row.id}: ${row.label}\nوضعیت: ${row.enabled ? "فعال" : "غیرفعال"}\nاعتبار: ${row.last_status}${row.last_error ? "\nخطا: "+row.last_error : ""}`,reply_markup:{inline_keyboard:[
+      [{text:row.enabled ? "غیرفعال‌سازی" : "فعال‌سازی",callback_data:`key_toggle:${id}`},{text:"اعتبارسنجی",callback_data:`key_validate:${id}`}],
+      [{text:"حذف کلید",callback_data:`key_delete:${id}`}],[{text:"بازگشت",callback_data:"manage_keys"}]
+    ]}}).then(()=>undefined);
+  }
+  if (data.startsWith("key_toggle:")) {
+    const id=Number(data.slice(11));
+    await env.DB.prepare("UPDATE api_keys SET enabled=CASE enabled WHEN 1 THEN 0 ELSE 1 END WHERE id=?").bind(id).run();
+    return showKeys(env,chatId);
+  }
+  if (data.startsWith("key_delete:")) {
+    const id=Number(data.slice(11));
+    await env.DB.prepare("DELETE FROM api_keys WHERE id=?").bind(id).run();
+    return showKeys(env,chatId);
+  }
+  if (data.startsWith("key_validate:")) {
+    const id=Number(data.slice(13));
+    const row=await env.DB.prepare("SELECT encrypted_key FROM api_keys WHERE id=?").bind(id).first<{encrypted_key:string}>();
+    if (!row) return showKeys(env,chatId);
+    try {
+      const key=await decryptApiKey(env,row.encrypted_key);
+      const response=await fetch("https://api.x.ai/v1/models",{headers:{authorization:`Bearer ${key}`}});
+      await env.DB.prepare("UPDATE api_keys SET last_status=?,last_error=?,last_checked_at=datetime('now') WHERE id=?")
+        .bind(response.ok ? "valid" : "invalid",response.ok ? null : `HTTP ${response.status}`,id).run();
+    } catch (e) {
+      await env.DB.prepare("UPDATE api_keys SET last_status='error',last_error=?,last_checked_at=datetime('now') WHERE id=?")
+        .bind(e instanceof Error ? e.message.slice(0,160) : "validation error",id).run();
+    }
+    return showKeys(env,chatId);
+  }
+}
+async function processAdminPrivateMessage(env: Env, message: TelegramMessage): Promise<boolean> {
+  if (message.chat.type !== "private" || !message.from || !isAdmin(env,message.from.id)) return false;
+  const session = await env.DB.prepare("SELECT action FROM admin_sessions WHERE user_id=? AND expires_at>datetime('now')")
+    .bind(String(message.from.id)).first<{action:string}>();
+  if (!session) return false;
+  const input = (message.text ?? message.caption ?? "").trim();
+  if (!input) return false;
+  if (session.action === "set_channel") {
+    await setSetting(env,"required_channel",input.replace(/^https?:\/\/(www\.)?t\.me\//,"").replace(/\/$/,""));
+    await env.DB.prepare("DELETE FROM admin_sessions WHERE user_id=?").bind(String(message.from.id)).run();
+    await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:`کانال عضویت تنظیم شد: ${input}\nحالا از پنل، عضویت اجباری را روشن کن.`});
+    return true;
+  }
+  if (session.action === "add_xai_key") {
+    if (!input.startsWith("xai-") && input.length < 20) {
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"فرمت کلید کوتاه یا نامعتبر به نظر می‌رسد. دوباره کلید را بفرست."});
+      return true;
+    }
+    try {
+      const encrypted = await encryptApiKey(env,input);
+      const label = `xAI ••••${input.slice(-4)}`;
+      await env.DB.prepare("INSERT INTO api_keys(provider,label,encrypted_key,enabled,last_status) VALUES ('xai',?,?,1,'unchecked')")
+        .bind(label,encrypted).run();
+      await env.DB.prepare("DELETE FROM admin_sessions WHERE user_id=?").bind(String(message.from.id)).run();
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"کلید به‌شکل رمزگذاری‌شده ذخیره شد. از پنل مدیریت می‌توانی آن را اعتبارسنجی یا فعال/غیرفعال کنی."});
+    } catch {
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"ذخیره کلید انجام نشد. مطمئن شو KEY_ENCRYPTION_SECRET در Cloudflare به‌صورت Secret تنظیم شده و حداقل ۳۲ کاراکتر دارد."});
+    }
+    try { await telegramApi(env,"deleteMessage",{chat_id:message.chat.id,message_id:message.message_id}); } catch {}
+    return true;
+  }
+  return false;
+}
+async function checkRequiredMembership(env: Env, message: TelegramMessage): Promise<boolean> {
+  if (!message.from || message.chat.type === "private") return true;
+  if ((await getSetting(env,"membership_required")) !== "1") return true;
+  const channel = await getSetting(env,"required_channel");
+  if (!channel) return true;
+  try {
+    const member = await telegramApi<{status:string}>(env,"getChatMember",{chat_id:channel,user_id:message.from.id});
+    if (["creator","administrator","member"].includes(member.status)) return true;
+    if (member.status === "restricted" && (member as {is_member?:boolean}).is_member) return true;
+  } catch (e) {
+    console.error("Membership check failed; request blocked", e instanceof Error ? e.message : "unknown");
+  }
+  const target = channel.startsWith("@") ? `https://t.me/${channel.slice(1)}` : `https://t.me/${channel}`;
+  await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"برای استفاده از ربات ابتدا در کانال اعلام‌شده عضو شو.",reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true},reply_markup:{inline_keyboard:[[{text:"عضویت در کانال",url:target}],[{text:"بررسی دوباره عضویت",callback_data:"check_membership"}]]}});
+  return false;
+}
+async function notifyGroupPending(env: Env, message: TelegramMessage): Promise<void> {
+  const chatId=String(message.chat.id);
+  await env.DB.prepare(`INSERT INTO groups(chat_id,title,enabled,approved,updated_at) VALUES(?,?,0,0,datetime('now'))
+    ON CONFLICT(chat_id) DO UPDATE SET title=excluded.title,enabled=0,approved=0,updated_at=datetime('now')`)
+    .bind(chatId,message.chat.title ?? "گروه جدید").run();
+  let count="نامشخص";
+  let invite="قابل دریافت نیست";
+  try { count=String(await telegramApi<number>(env,"getChatMemberCount",{chat_id:message.chat.id})); } catch {}
+  try { const link=await telegramApi<{invite_link:string}>(env,"createChatInviteLink",{chat_id:message.chat.id}); invite=link.invite_link; } catch {}
+  const admins=(env.ADMIN_USER_IDS ?? "").split(",").map(v=>v.trim()).filter(Boolean);
+  for (const admin of admins) {
+    try {
+      await telegramApi(env,"sendMessage",{chat_id:admin,text:`درخواست تأیید گروه جدید\nنام: ${message.chat.title ?? "بدون عنوان"}\nشناسه: ${chatId}\nتعداد اعضا: ${count}\nلینک دعوت: ${invite}\nاضافه‌کننده: ${message.from ? [message.from.first_name,message.from.last_name].filter(Boolean).join(" ") + " ("+message.from.id+")" : "نامشخص"}`,reply_markup:{inline_keyboard:[[{text:"تأیید گروه",callback_data:`admin_approve:${chatId}:1`},{text:"رد / غیرفعال",callback_data:`admin_approve:${chatId}:0`}]]}});
+    } catch {}
+  }
 }
 
 async function telegramApi<T>(
