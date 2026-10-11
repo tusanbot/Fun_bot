@@ -505,8 +505,9 @@ async function importTelegramExport(
          (chat_id, telegram_message_id, user_id, message_date, text_content, reply_to_message_id, source)
          VALUES (?, ?, ?, ?, ?, ?, 'telegram_desktop_export')
          ON CONFLICT(chat_id, telegram_message_id) DO UPDATE SET
-           text_content = CASE WHEN messages.text_content IS NULL OR trim(messages.text_content) = '' THEN excluded.text_content ELSE messages.text_content END,
-           message_date = COALESCE(messages.message_date, excluded.message_date)`,
+           text_content = excluded.text_content,
+           message_date = COALESCE(messages.message_date, excluded.message_date)
+         WHERE messages.text_content IS NULL OR trim(messages.text_content) = ''`,
       ).bind(chatId, messageId, senderId, messageDate, content || null, replyId));
     }
     try {
