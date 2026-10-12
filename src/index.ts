@@ -107,6 +107,68 @@ async function answerMarkup(env: Env) {
     [{ text: "راهنمای دریافت کلید xAI / Grok", url: "https://console.x.ai/" }],
   ] };
 }
+async function isGroupAdmin(env: Env, chatId: string, userId: number): Promise<boolean> {
+  try {
+    const member = await telegramApi<{status:string}>(env, "getChatMember", {chat_id:chatId,user_id:userId});
+    return member.status === "creator" || member.status === "administrator";
+  } catch { return false; }
+}
+
+async function showPrivateMenu(env: Env, chatId: number, userId: number): Promise<void> {
+  const admin = isAdmin(env,userId);
+  await telegramApi(env,"sendMessage",{chat_id:chatId,
+    text:"سلام! 👋\nبه ربات حافظه گروه خوش آمدی. از منوی زیر راهنما را ببین یا گروهی را که مدیرش هستی تنظیم کن.\n\nبرای پاسخ‌گویی در گروه، ربات را منشن کن یا به پیامش ریپلای بزن.",
+    reply_markup:{inline_keyboard:[
+      [{text:"راهنمای ربات",callback_data:"help_home"}],
+      [{text:"مدیریت گروه‌ها (مدیر گروه)",callback_data:"group_manage_list"}],
+      [{text:admin ? "پنل مدیریت کل ربات" : "مدیریت ربات (ویژه مدیر کل)",callback_data:admin ? "manage_home" : "bot_admin_info"}]
+    ]}});
+}
+
+async function showHelp(env: Env, chatId: number): Promise<void> {
+  await telegramApi(env,"sendMessage",{chat_id:chatId,
+    text:"راهنمای ربات حافظه گروه\n\n• پرسش از حافظه: در گروه ربات را منشن کن یا به پیامش ریپلای بزن.\n• فعال‌سازی گروه: گروه باید توسط مدیر کل ربات تأیید شده باشد.\n• تنظیمات گروه: از پیوی ربات، مدیریت گروه‌ها را باز کن و گروه را انتخاب کن.\n• ثبت کلید AI: از تنظیمات گروه گزینه تنظیم کلید را بزن و کلید را فقط در پیوی ارسال کن؛ کلید رمزگذاری‌شده ذخیره می‌شود.\n• ثبت تاریخچه: در گروه مقصد /history را بفرست؛ سپس خروجی JSON/HTML/TXT تلگرام یا متن ساده را در پیوی ربات ارسال کن.\n• حافظه گروه: مدیر گروه می‌تواند ذخیره‌سازی را خاموش/روشن کند و سقف تعداد پیام و مدت نگهداری را تعیین کند.\n• مدیر کل: برای دسترسی به پنل عمومی، شناسه عددی حساب باید در ADMIN_USER_IDS در Cloudflare باشد.",
+    reply_markup:{inline_keyboard:[[{text:"بازگشت به منوی اصلی",callback_data:"private_home"}],[{text:"مدیریت گروه‌ها",callback_data:"group_manage_list"}]]}});
+}
+
+async function showUserGroups(env: Env, chatId: number, userId: number): Promise<void> {
+  const rows = await env.DB.prepare("SELECT chat_id,title FROM groups WHERE approved=1 AND enabled=1 ORDER BY updated_at DESC LIMIT 50").all<{chat_id:string;title:string|null}>();
+  const buttons: Array<Array<{text:string;callback_data:string}>> = [];
+  for (const row of rows.results ?? []) {
+    if (await isGroupAdmin(env,row.chat_id,userId)) buttons.push([{text:(row.title || row.chat_id).slice(0,45),callback_data:"group_settings:"+row.chat_id}]);
+  }
+  if (!buttons.length) {
+    await telegramApi(env,"sendMessage",{chat_id:chatId,text:"گروه فعالی که هم ربات در آن فعال باشد و هم شما مدیرش باشید پیدا نشد. گروه باید توسط مدیر کل ربات تأیید شده باشد.",reply_markup:{inline_keyboard:[[{text:"بازگشت",callback_data:"private_home"}]]}});
+    return;
+  }
+  buttons.push([{text:"بازگشت",callback_data:"private_home"}]);
+  await telegramApi(env,"sendMessage",{chat_id:chatId,text:"گروهی را که مدیرش هستی انتخاب کن:",reply_markup:{inline_keyboard:buttons}});
+}
+
+async function showGroupSettings(env: Env, chatId: number, groupId: string, userId: number): Promise<void> {
+  if (!await isGroupAdmin(env,groupId,userId)) { await telegramApi(env,"sendMessage",{chat_id:chatId,text:"برای تنظیم این گروه باید مدیر همان گروه باشی."}); return; }
+  const row = await env.DB.prepare("SELECT title,memory_enabled,max_messages,retention_days FROM groups WHERE chat_id=? AND approved=1 AND enabled=1").bind(groupId).first<{title:string|null;memory_enabled:number;max_messages:number;retention_days:number}>();
+  if (!row) { await telegramApi(env,"sendMessage",{chat_id:chatId,text:"این گروه فعال یا تأییدشده نیست."}); return; }
+  await telegramApi(env,"sendMessage",{chat_id:chatId,text:"تنظیمات گروه: "+(row.title || groupId)+"\n\nذخیره پیام‌ها: "+(row.memory_enabled ? "روشن" : "خاموش")+"\nحداکثر پیام: "+row.max_messages+"\nمدت نگهداری: "+row.retention_days+" روز",reply_markup:{inline_keyboard:[
+    [{text:"تنظیم کلید AI گروه",callback_data:"group_key_info:"+groupId}],
+    [{text:"راهنمای ثبت تاریخچه",callback_data:"group_history:"+groupId}],
+    [{text:"تنظیمات حافظه گروه",callback_data:"group_memory:"+groupId}],
+    [{text:"بازگشت به گروه‌ها",callback_data:"group_manage_list"}]
+  ]}});
+}
+
+async function showGroupMemorySettings(env: Env, chatId: number, groupId: string, userId: number): Promise<void> {
+  if (!await isGroupAdmin(env,groupId,userId)) { await telegramApi(env,"sendMessage",{chat_id:chatId,text:"دسترسی مدیر گروه لازم است."}); return; }
+  const row = await env.DB.prepare("SELECT memory_enabled,max_messages,retention_days FROM groups WHERE chat_id=?").bind(groupId).first<{memory_enabled:number;max_messages:number;retention_days:number}>();
+  if (!row) return;
+  await telegramApi(env,"sendMessage",{chat_id:chatId,text:"تنظیمات حافظه\nذخیره‌سازی: "+(row.memory_enabled ? "روشن" : "خاموش")+"\nحداکثر پیام: "+row.max_messages+"\nمدت نگهداری: "+row.retention_days+" روز",reply_markup:{inline_keyboard:[
+    [{text:row.memory_enabled ? "خاموش کردن ذخیره‌سازی" : "روشن کردن ذخیره‌سازی",callback_data:"group_toggle_storage:"+groupId}],
+    [{text:"تعیین حداکثر تعداد پیام",callback_data:"group_set_max:"+groupId}],
+    [{text:"تعیین مدت نگهداری",callback_data:"group_set_retention:"+groupId}],
+    [{text:"بازگشت",callback_data:"group_settings:"+groupId}]
+  ]}});
+}
+
 async function showAdminPanel(env: Env, chatId: number): Promise<void> {
   const markup = await answerMarkup(env);
   await telegramApi(env, "sendMessage", { chat_id: chatId, text:
@@ -139,12 +201,49 @@ async function showKeys(env: Env, chatId: number): Promise<void> {
 async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<void> {
   const data = query.data ?? "";
   const actor = String(query.from.id);
+  const chatId = query.message?.chat.id ?? query.from.id;
+  if (data === "private_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showPrivateMenu(env,chatId,query.from.id); }
+  if (data === "help_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showHelp(env,chatId); }
+  if (data === "bot_admin_info") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"این بخش مخصوص مدیر کل ربات است.",show_alert:true}); return; }
+  if (data === "group_manage_list") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showUserGroups(env,chatId,query.from.id); }
+  if (data.startsWith("group_settings:")) { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showGroupSettings(env,chatId,data.slice("group_settings:".length),query.from.id); }
+  if (data.startsWith("group_memory:")) { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showGroupMemorySettings(env,chatId,data.slice("group_memory:".length),query.from.id); }
+  if (data.startsWith("group_toggle_storage:")) {
+    const groupId=data.slice("group_toggle_storage:".length);
+    if (!await isGroupAdmin(env,groupId,query.from.id)) { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"دسترسی مدیر گروه لازم است.",show_alert:true}); return; }
+    await env.DB.prepare("UPDATE groups SET memory_enabled=CASE memory_enabled WHEN 1 THEN 0 ELSE 1 END,updated_at=datetime('now') WHERE chat_id=?").bind(groupId).run();
+    await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"تنظیم ذخیره‌سازی تغییر کرد."});
+    return showGroupMemorySettings(env,chatId,groupId,query.from.id);
+  }
+  if (data.startsWith("group_history:")) {
+    const groupId=data.slice("group_history:".length);
+    await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id});
+    if (!await isGroupAdmin(env,groupId,query.from.id)) { await telegramApi(env,"sendMessage",{chat_id:chatId,text:"دسترسی مدیر گروه لازم است."}); return; }
+    await telegramApi(env,"sendMessage",{chat_id:chatId,text:"برای ثبت تاریخچه، در گروه مقصد /history را بفرست؛ سپس فایل JSON/HTML/TXT خروجی Telegram Desktop یا متن ساده را همین‌جا در پیوی ارسال کن.",reply_markup:{inline_keyboard:[[{text:"بازگشت به تنظیمات گروه",callback_data:"group_settings:"+groupId}]]}});
+    return;
+  }
+  if (data.startsWith("group_key_info:")) {
+    const groupId=data.slice("group_key_info:".length);
+    await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id});
+    if (!await isGroupAdmin(env,groupId,query.from.id)) { await telegramApi(env,"sendMessage",{chat_id:chatId,text:"دسترسی مدیر گروه لازم است."}); return; }
+    await telegramApi(env,"sendMessage",{chat_id:chatId,text:"برای استفاده از کلید AI در این نسخه، مدیر کل ربات باید کلید xAI/Grok را از پنل «مدیریت کلیدهای AI» ثبت کند. تنظیم کلید اختصاصی برای هر گروه در مرحله بعد اضافه می‌شود.",reply_markup:{inline_keyboard:[[{text:"بازگشت به تنظیمات گروه",callback_data:"group_settings:"+groupId}]]}});
+    return;
+  }
+  if (data.startsWith("group_set_max:") || data.startsWith("group_set_retention:")) {
+    const isMax=data.startsWith("group_set_max:");
+    const groupId=data.slice(isMax ? "group_set_max:".length : "group_set_retention:".length);
+    if (!await isGroupAdmin(env,groupId,query.from.id)) { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"دسترسی مدیر گروه لازم است.",show_alert:true}); return; }
+    await env.DB.prepare("INSERT INTO admin_sessions(user_id,action,chat_id,expires_at) VALUES(?,?,?,datetime('now','+10 minutes')) ON CONFLICT(user_id) DO UPDATE SET action=excluded.action,chat_id=excluded.chat_id,created_at=datetime('now'),expires_at=excluded.expires_at")
+      .bind(actor,isMax ? "group_max_messages" : "group_retention_days",groupId).run();
+    await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id});
+    await telegramApi(env,"sendMessage",{chat_id:chatId,text:isMax ? "حداکثر تعداد پیام را به عددی بین ۱۰۰ تا ۱۰۰۰۰۰ بفرست." : "مدت نگهداری را به تعداد روز (۱ تا ۳۶۵۰) بفرست."});
+    return;
+  }
   if (!isAdmin(env, actor)) {
     await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"دسترسی مدیر لازم است.",show_alert:true});
     return;
   }
   await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id});
-  const chatId = query.message?.chat.id ?? query.from.id;
   if (data === "manage_home") return showAdminPanel(env, chatId);
   if (data === "manage_groups") return showGroups(env, query.from.id, chatId);
   if (data === "manage_keys") return showKeys(env, chatId);
@@ -691,13 +790,8 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     if (!await checkRequiredMembership(env,message)) return;
   }
   if (command === "/start") {
-    const welcome =
-      "سلام! 👋\n\nمن ربات حافظه گروه هستم؛ پیام‌های گروه‌های تأییدشده را برای جست‌وجو ذخیره می‌کنم و فقط با منشن یا ریپلای پاسخ می‌دهم.\n" +
-      "مدیر ربات می‌تواند در پیوی دستور /manage را برای باز کردن پنل مدیریت بفرستد.";
-    await telegramApi(env, "sendMessage", {
-      chat_id: message.chat.id,
-      text: welcome,
-    });
+    if (message.chat.type === "private" && message.from) await showPrivateMenu(env,message.chat.id,message.from.id);
+    else await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"سلام! برای راهنمای کامل، در پیوی ربات /start را بفرست."});
     return;
   }
 
