@@ -112,7 +112,14 @@ async function isGroupAdmin(env: Env, chatId: string, userId: number): Promise<b
   try {
     const member = await telegramApi<{status:string}>(env, "getChatMember", {chat_id:chatId,user_id:userId});
     return member.status === "creator" || member.status === "administrator";
-  } catch { return false; }
+  } catch (error) {
+    console.warn("Could not verify Telegram group administrator", {
+      chat_id: chatId,
+      user_id: userId,
+      error: error instanceof Error ? error.message : "unknown error",
+    });
+    return false;
+  }
 }
 
 async function showPrivateMenu(env: Env, chatId: number, userId: number): Promise<void> {
