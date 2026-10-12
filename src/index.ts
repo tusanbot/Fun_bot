@@ -115,7 +115,7 @@ async function isGroupAdmin(env: Env, chatId: string, userId: number): Promise<b
   } catch { return false; }
 }
 
-async function showPrivateMenu(env: Env, chatId: number, userId: number): Promise<void> {
+async function showPrivateMenu(env: Env, chatId: number): Promise<void> {
   await telegramApi(env,"sendMessage",{chat_id:chatId,
     text:"سلام! 👋\nبه ربات حافظه گروه خوش آمدی. از دکمه‌های پایین صفحه برای راهنما و تنظیمات استفاده کن.\n\nبرای پاسخ‌گویی در گروه، ربات را منشن کن یا به پیامش ریپلای بزن.",
     reply_markup:{keyboard:[
@@ -202,7 +202,7 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
   const data = query.data ?? "";
   const actor = String(query.from.id);
   const chatId = query.message?.chat.id ?? query.from.id;
-  if (data === "private_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showPrivateMenu(env,chatId,query.from.id); }
+  if (data === "private_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showPrivateMenu(env,chatId); }
   if (data === "help_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showHelp(env,chatId); }
   if (data === "bot_admin_info") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"این بخش مخصوص مدیر کل ربات است.",show_alert:true}); return; }
   if (data === "group_manage_list") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showUserGroups(env,chatId,query.from.id); }
@@ -848,7 +848,7 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     if (!await checkRequiredMembership(env,message)) return;
   }
   if (command === "/start") {
-    if (message.chat.type === "private" && message.from) await showPrivateMenu(env,message.chat.id,message.from.id);
+    if (message.chat.type === "private" && message.from) await showPrivateMenu(env,message.chat.id);
     else await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"سلام! برای راهنمای کامل، در پیوی ربات /start را بفرست."});
     return;
   }
