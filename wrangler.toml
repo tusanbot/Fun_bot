@@ -3,6 +3,7 @@ main = "src/index.ts"
 compatibility_date = "2026-10-11"
 
 [vars]
+"ADMIN_USER_IDS": "7918162941",
 BOT_USERNAME = "Ai_sokhangoo_bot"
 
 [[d1_databases]]
