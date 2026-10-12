@@ -57,6 +57,7 @@ interface TelegramCallbackQuery {
   message?: TelegramMessage;
 }
 interface TelegramUpdate {
+  update_id?: number;
   message?: TelegramMessage;
   edited_message?: TelegramMessage;
   callback_query?: TelegramCallbackQuery;
@@ -115,14 +116,13 @@ async function isGroupAdmin(env: Env, chatId: string, userId: number): Promise<b
 }
 
 async function showPrivateMenu(env: Env, chatId: number, userId: number): Promise<void> {
-  const admin = isAdmin(env,userId);
   await telegramApi(env,"sendMessage",{chat_id:chatId,
-    text:"سلام! 👋\nبه ربات حافظه گروه خوش آمدی. از منوی زیر راهنما را ببین یا گروهی را که مدیرش هستی تنظیم کن.\n\nبرای پاسخ‌گویی در گروه، ربات را منشن کن یا به پیامش ریپلای بزن.",
-    reply_markup:{inline_keyboard:[
-      [{text:"راهنمای ربات",callback_data:"help_home"}],
-      [{text:"مدیریت گروه‌ها (مدیر گروه)",callback_data:"group_manage_list"}],
-      [{text:admin ? "پنل مدیریت کل ربات" : "مدیریت ربات (ویژه مدیر کل)",callback_data:admin ? "manage_home" : "bot_admin_info"}]
-    ]}});
+    text:"سلام! 👋\nبه ربات حافظه گروه خوش آمدی. از دکمه‌های پایین صفحه برای راهنما و تنظیمات استفاده کن.\n\nبرای پاسخ‌گویی در گروه، ربات را منشن کن یا به پیامش ریپلای بزن.",
+    reply_markup:{keyboard:[
+      [{text:"راهنمای ربات"}],
+      [{text:"مدیریت گروه‌ها"}],
+      [{text:"پنل مدیریت کل ربات"}]
+    ],resize_keyboard:true,is_persistent:true,input_field_placeholder:"یک گزینه از منوی ربات انتخاب کن"}});
 }
 
 async function showHelp(env: Env, chatId: number): Promise<void> {
@@ -818,9 +818,21 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   }
   const message = update.message ?? update.edited_message;
   if (!message || message.from?.is_bot) return;
-  if (message.chat.type === "private" && message.from && await processAdminPrivateMessage(env, message)) return;
 
   const rawText = message.text ?? message.caption ?? "";
+  const privateMenuText = rawText.trim();
+  if (message.chat.type === "private" && message.from) {
+    console.log("Private Telegram message received", { update_id: update.update_id, user_id: message.from.id, text: privateMenuText.startsWith("/") ? privateMenuText.split(/\s+/, 1)[0] : privateMenuText.slice(0, 80) });
+    if (privateMenuText === "راهنمای ربات") { await showHelp(env,message.chat.id); return; }
+    if (privateMenuText === "مدیریت گروه‌ها" || privateMenuText === "مدیریت گروه‌ها (مدیر گروه)") { await showUserGroups(env,message.chat.id,message.from.id); return; }
+    if (privateMenuText === "پنل مدیریت کل ربات") {
+      if (isAdmin(env,message.from.id)) await showAdminPanel(env,message.chat.id);
+      else await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"این بخش مخصوص مدیر کل ربات است. برای فعال‌سازی، شناسه عددی تلگرام مدیر را در متغیر ADMIN_USER_IDS در Cloudflare ثبت کن."});
+      return;
+    }
+    if (privateMenuText === "/help") { await showHelp(env,message.chat.id); return; }
+    if (await processAdminPrivateMessage(env, message)) return;
+  }
   const command = rawText.trim().split(/\s+/, 1)[0].split("@")[0].toLowerCase();
   if (message.chat.type !== "private") {
     if (message.new_chat_members?.some((member) => member.username?.toLowerCase() === env.BOT_USERNAME.replace(/^@/,"").toLowerCase())) {
@@ -1025,6 +1037,7 @@ export default {
     }
 
     try {
+      console.log("Telegram webhook update received", { update_id: update.update_id, update_type: update.callback_query ? "callback_query" : update.message ? "message" : update.edited_message ? "edited_message" : "other" });
       await handleUpdate(env, update);
       return Response.json({ ok: true });
     } catch (error) {
