@@ -1056,8 +1056,20 @@ export default {
       return new Response("Not found", { status: 404 });
     }
 
+    // Log webhook arrival before authentication so rejected requests are observable.
+    // Never log the supplied or configured secret.
+    console.log("Webhook request received", {
+      method: request.method,
+      path: url.pathname,
+      hasSecretHeader: request.headers.has("X-Telegram-Bot-Api-Secret-Token"),
+      secretConfigured: Boolean(env.WEBHOOK_SECRET),
+    });
     const suppliedSecret = request.headers.get("X-Telegram-Bot-Api-Secret-Token");
     if (!env.WEBHOOK_SECRET || suppliedSecret !== env.WEBHOOK_SECRET) {
+      console.warn("Webhook request rejected: secret token mismatch", {
+        secretConfigured: Boolean(env.WEBHOOK_SECRET),
+        hasSecretHeader: Boolean(suppliedSecret),
+      });
       return new Response("Unauthorized", { status: 401 });
     }
 
