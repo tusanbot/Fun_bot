@@ -226,7 +226,9 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
     const groupId=data.slice("group_key_info:".length);
     await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id});
     if (!await isGroupAdmin(env,groupId,query.from.id)) { await telegramApi(env,"sendMessage",{chat_id:chatId,text:"دسترسی مدیر گروه لازم است."}); return; }
-    await telegramApi(env,"sendMessage",{chat_id:chatId,text:"برای استفاده از کلید AI در این نسخه، مدیر کل ربات باید کلید xAI/Grok را از پنل «مدیریت کلیدهای AI» ثبت کند. تنظیم کلید اختصاصی برای هر گروه در مرحله بعد اضافه می‌شود.",reply_markup:{inline_keyboard:[[{text:"بازگشت به تنظیمات گروه",callback_data:"group_settings:"+groupId}]]}});
+    await env.DB.prepare("INSERT INTO admin_sessions(user_id,action,chat_id,expires_at) VALUES(?,'add_group_xai_key',?,datetime('now','+10 minutes')) ON CONFLICT(user_id) DO UPDATE SET action='add_group_xai_key',chat_id=excluded.chat_id,created_at=datetime('now'),expires_at=excluded.expires_at")
+      .bind(actor,groupId).run();
+    await telegramApi(env,"sendMessage",{chat_id:chatId,text:"کلید xAI را فقط همین‌جا در پیوی ارسال کن. کلید رمزگذاری‌شده ذخیره و فقط برای همین گروه استفاده می‌شود. دریافت کلید: https://console.x.ai/"});
     return;
   }
   if (data.startsWith("group_set_max:") || data.startsWith("group_set_retention:")) {
@@ -322,7 +324,7 @@ async function processAdminPrivateMessage(env: Env, message: TelegramMessage): P
   const session = await env.DB.prepare("SELECT action,chat_id FROM admin_sessions WHERE user_id=? AND expires_at>datetime('now')")
     .bind(String(message.from.id)).first<{action:string;chat_id:string|null}>();
   if (!session) return false;
-  const groupScoped = session.action === "group_max_messages" || session.action === "group_retention_days";
+  const groupScoped = session.action === "group_max_messages" || session.action === "group_retention_days" || session.action === "add_group_xai_key";
   if (!isAdmin(env,message.from.id) && (!groupScoped || !session.chat_id || !await isGroupAdmin(env,session.chat_id,message.from.id))) return false;
   const input = (message.text ?? message.caption ?? "").trim();
   if (!input || input.startsWith("/")) {
@@ -332,6 +334,24 @@ async function processAdminPrivateMessage(env: Env, message: TelegramMessage): P
       return true;
     }
     return false;
+  }
+  if (session.action === "add_group_xai_key") {
+    if (!session.chat_id) return false;
+    if (input.length < 20) {
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"کلید کوتاه یا نامعتبر است؛ دوباره کلید را ارسال کن."});
+      return true;
+    }
+    try {
+      const encrypted=await encryptApiKey(env,input);
+      const label="گروه "+session.chat_id+" ••••"+input.slice(-4);
+      await env.DB.prepare("INSERT INTO api_keys(provider,label,encrypted_key,enabled,last_status,chat_id) VALUES('xai',?,?,1,'unchecked',?)").bind(label,encrypted,session.chat_id).run();
+      await env.DB.prepare("DELETE FROM admin_sessions WHERE user_id=?").bind(String(message.from.id)).run();
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"کلید رمزگذاری شد و برای همین گروه ذخیره شد."});
+    } catch {
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"ذخیره کلید انجام نشد. مدیر کل باید KEY_ENCRYPTION_SECRET را در Cloudflare به‌صورت Secret با حداقل ۳۲ کاراکتر تنظیم کند."});
+    }
+    try { await telegramApi(env,"deleteMessage",{chat_id:message.chat.id,message_id:message.message_id}); } catch {}
+    return true;
   }
   if (session.action === "group_max_messages" || session.action === "group_retention_days") {
     const value=Number(input);
@@ -730,8 +750,8 @@ async function generateGroqAnswer(
     { role: "user", content: prompt.slice(0, 1800) },
   ];
   const credentials: Array<{provider:"xai"|"groq";key:string;id:number|null}> = [];
-  const savedKeys = await env.DB.prepare("SELECT id,provider,encrypted_key FROM api_keys WHERE enabled=1 ORDER BY CASE WHEN last_status IN ('rate_limited','request_error','decrypt_error','invalid') THEN 1 ELSE 0 END, id ASC")
-    .all<{id:number;provider:string;encrypted_key:string}>();
+  const savedKeys = await env.DB.prepare("SELECT id,provider,encrypted_key FROM api_keys WHERE enabled=1 AND (chat_id IS NULL OR chat_id=?) ORDER BY CASE WHEN chat_id IS NOT NULL THEN 0 WHEN last_status IN ('rate_limited','request_error','decrypt_error','invalid') THEN 1 ELSE 0 END, id ASC")
+    .bind(String(message.chat.id)).all<{id:number;provider:string;encrypted_key:string}>();
   for (const row of savedKeys.results ?? []) {
     try { credentials.push({provider:row.provider === "groq" ? "groq" : "xai",key:await decryptApiKey(env,row.encrypted_key),id:row.id}); }
     catch { await env.DB.prepare("UPDATE api_keys SET last_status='decrypt_error',last_error='decryption failed' WHERE id=?").bind(row.id).run(); }
