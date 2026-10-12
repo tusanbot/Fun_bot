@@ -318,10 +318,12 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
   }
 }
 async function processAdminPrivateMessage(env: Env, message: TelegramMessage): Promise<boolean> {
-  if (message.chat.type !== "private" || !message.from || !isAdmin(env,message.from.id)) return false;
-  const session = await env.DB.prepare("SELECT action FROM admin_sessions WHERE user_id=? AND expires_at>datetime('now')")
-    .bind(String(message.from.id)).first<{action:string}>();
+  if (message.chat.type !== "private" || !message.from) return false;
+  const session = await env.DB.prepare("SELECT action,chat_id FROM admin_sessions WHERE user_id=? AND expires_at>datetime('now')")
+    .bind(String(message.from.id)).first<{action:string;chat_id:string|null}>();
   if (!session) return false;
+  const groupScoped = session.action === "group_max_messages" || session.action === "group_retention_days";
+  if (!isAdmin(env,message.from.id) && (!groupScoped || !session.chat_id || !await isGroupAdmin(env,session.chat_id,message.from.id))) return false;
   const input = (message.text ?? message.caption ?? "").trim();
   if (!input || input.startsWith("/")) {
     if (input === "/cancel") {
@@ -330,6 +332,21 @@ async function processAdminPrivateMessage(env: Env, message: TelegramMessage): P
       return true;
     }
     return false;
+  }
+  if (session.action === "group_max_messages" || session.action === "group_retention_days") {
+    const value=Number(input);
+    const isMax=session.action === "group_max_messages";
+    const min=isMax ? 100 : 1;
+    const max=isMax ? 100000 : 3650;
+    if (!Number.isInteger(value) || value < min || value > max || !session.chat_id) {
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:isMax ? "عدد نامعتبر است؛ عددی بین ۱۰۰ تا ۱۰۰۰۰۰ بفرست." : "عدد نامعتبر است؛ تعداد روز باید بین ۱ تا ۳۶۵۰ باشد."});
+      return true;
+    }
+    if (isMax) await env.DB.prepare("UPDATE groups SET max_messages=?,updated_at=datetime('now') WHERE chat_id=?").bind(value,session.chat_id).run();
+    else await env.DB.prepare("UPDATE groups SET retention_days=?,updated_at=datetime('now') WHERE chat_id=?").bind(value,session.chat_id).run();
+    await env.DB.prepare("DELETE FROM admin_sessions WHERE user_id=?").bind(String(message.from.id)).run();
+    await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:isMax ? "سقف پیام‌های گروه روی "+value+" تنظیم شد." : "مدت نگهداری گروه روی "+value+" روز تنظیم شد."});
+    return true;
   }
   if (session.action === "set_channel") {
     await setSetting(env,"required_channel",input.replace(/^https?:\/\/(www\.)?t\.me\//,"").replace(/\/$/,""));
@@ -475,6 +492,10 @@ async function saveMessage(env: Env, message: TelegramMessage): Promise<void> {
     ).bind(chatId, userId, displayName, message.from.username ?? null).run();
   }
 
+  const settings = await env.DB.prepare("SELECT memory_enabled,max_messages,retention_days FROM groups WHERE chat_id=?")
+    .bind(chatId).first<{memory_enabled:number;max_messages:number;retention_days:number}>();
+  if (settings && settings.memory_enabled === 0) return;
+
   await env.DB.prepare(
     `INSERT INTO messages
       (chat_id, telegram_message_id, user_id, message_date, text_content, reply_to_message_id, source)
@@ -489,6 +510,11 @@ async function saveMessage(env: Env, message: TelegramMessage): Promise<void> {
     content,
     message.reply_to_message ? String(message.reply_to_message.message_id) : null,
   ).run();
+
+  const retentionDays=settings?.retention_days ?? 365;
+  const maxMessages=settings?.max_messages ?? 10000;
+  await env.DB.prepare("DELETE FROM messages WHERE chat_id=? AND julianday(message_date) < julianday('now', '-' || ? || ' days')").bind(chatId,retentionDays).run();
+  await env.DB.prepare("DELETE FROM messages WHERE chat_id=? AND id NOT IN (SELECT id FROM messages WHERE chat_id=? ORDER BY julianday(message_date) DESC,id DESC LIMIT ?)").bind(chatId,chatId,maxMessages).run();
 }
 
 
