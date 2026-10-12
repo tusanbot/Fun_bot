@@ -115,14 +115,16 @@ async function isGroupAdmin(env: Env, chatId: string, userId: number): Promise<b
   } catch { return false; }
 }
 
-async function showPrivateMenu(env: Env, chatId: number): Promise<void> {
+async function showPrivateMenu(env: Env, chatId: number, userId: number): Promise<void> {
+  const keyboard: Array<Array<{text:string}>> = [
+    [{text:"راهنمای ربات"}],
+    [{text:"مدیریت گروه‌ها"}],
+  ];
+  // Do not reveal the global administration entry to ordinary users.
+  if (isAdmin(env, userId)) keyboard.push([{text:"پنل مدیریت کل ربات"}]);
   await telegramApi(env,"sendMessage",{chat_id:chatId,
     text:"سلام! 👋\nبه ربات حافظه گروه خوش آمدی. از دکمه‌های پایین صفحه برای راهنما و تنظیمات استفاده کن.\n\nبرای پاسخ‌گویی در گروه، ربات را منشن کن یا به پیامش ریپلای بزن.",
-    reply_markup:{keyboard:[
-      [{text:"راهنمای ربات"}],
-      [{text:"مدیریت گروه‌ها"}],
-      [{text:"پنل مدیریت کل ربات"}]
-    ],resize_keyboard:true,is_persistent:true,input_field_placeholder:"یک گزینه از منوی ربات انتخاب کن"}});
+    reply_markup:{keyboard,resize_keyboard:true,is_persistent:true,input_field_placeholder:"یک گزینه از منوی ربات انتخاب کن"}});
 }
 
 async function showHelp(env: Env, chatId: number): Promise<void> {
@@ -202,7 +204,7 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
   const data = query.data ?? "";
   const actor = String(query.from.id);
   const chatId = query.message?.chat.id ?? query.from.id;
-  if (data === "private_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showPrivateMenu(env,chatId); }
+  if (data === "private_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showPrivateMenu(env,chatId,query.from.id); }
   if (data === "help_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showHelp(env,chatId); }
   if (data === "bot_admin_info") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"این بخش مخصوص مدیر کل ربات است.",show_alert:true}); return; }
   if (data === "group_manage_list") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showUserGroups(env,chatId,query.from.id); }
@@ -803,6 +805,12 @@ async function generateGroqAnswer(
 async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   if (update.callback_query) {
     const query = update.callback_query;
+    console.log("Telegram callback received", {
+      update_id: update.update_id,
+      user_id: query.from.id,
+      callback_data: query.data ?? "",
+      chat_id: query.message?.chat.id ?? query.from.id,
+    });
     if (query.data === "check_membership") {
       const channel = await getSetting(env, "required_channel");
       let ok = false;
@@ -813,7 +821,24 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:ok ? "عضویت تأیید شد؛ حالا دوباره پیام بده." : "هنوز عضویت شما تأیید نشد.",show_alert:!ok});
       return;
     }
-    await handleCallback(env, query);
+    try {
+      await handleCallback(env, query);
+    } catch (error) {
+      console.error("Failed to handle Telegram callback", {
+        update_id: update.update_id,
+        user_id: query.from.id,
+        callback_data: query.data ?? "",
+        error: error instanceof Error ? error.message : "unknown error",
+      });
+      try {
+        await telegramApi(env, "sendMessage", {
+          chat_id: query.message?.chat.id ?? query.from.id,
+          text: "این گزینه اجرا نشد. خطا ثبت شد؛ لطفاً دوباره تلاش کن. اگر تکرار شد، گزارش خطای Worker را بررسی کن.",
+        });
+      } catch (sendError) {
+        console.error("Could not send callback error notice", sendError instanceof Error ? sendError.message : "unknown error");
+      }
+    }
     return;
   }
   const message = update.message ?? update.edited_message;
@@ -848,7 +873,7 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     if (!await checkRequiredMembership(env,message)) return;
   }
   if (command === "/start") {
-    if (message.chat.type === "private" && message.from) await showPrivateMenu(env,message.chat.id);
+    if (message.chat.type === "private" && message.from) await showPrivateMenu(env,message.chat.id,message.from.id);
     else await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"سلام! برای راهنمای کامل، در پیوی ربات /start را بفرست."});
     return;
   }
