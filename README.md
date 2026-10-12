@@ -1,70 +1,98 @@
-# Fun_bot
+# Fun_bot — ربات حافظه گروه تلگرام
 
-A Telegram group-memory bot, built with a Cloudflare-first architecture.
+ربات تلگرام برای ذخیره تاریخچه گروه‌های تأییدشده، جست‌وجوی پیام‌ها و پاسخ‌گویی هوشمند فقط هنگام منشن یا ریپلای. معماری اجرا بر پایه Cloudflare Workers و D1 است.
 
-## Architecture
+## قابلیت‌ها
 
-- **Cloudflare Worker** receives Telegram updates through a webhook.
-- **Cloudflare D1** stores group-scoped messages and metadata.
-- **History importer** is a separate Python utility for Telegram Desktop JSON/HTML exports.
-- **MTProto crawling** is intentionally kept outside Workers; it requires a separately run Python process and explicit authorization.
-- **AI providers** will be implemented behind a shared interface so an API provider can be used first and a local model added later.
+- دریافت پیام‌های جدید گروه و ذخیره جداگانه بر اساس شناسه گروه.
+- جست‌وجوی متنی با SQLite FTS5 و ارسال پیام‌های مرتبط همان گروه به مدل هوش مصنوعی.
+- پاسخ‌گویی فقط در صورت منشن ربات یا ریپلای به پیام ربات.
+- واردسازی چندباره تاریخچه از فایل‌های Telegram Desktop با فرمت JSON، HTML و TXT؛ همچنین ثبت متن مستقیم در پیوی (هر خط یک پیام).
+- گزارش تعداد پیام‌های جدید، موارد تکراری و بسته‌های ناموفق در واردسازی JSON.
+- پنل خصوصی مدیر با دستور `/manage`: تأیید گروه‌ها، مدیریت کلیدهای AI و تنظیم عضویت اجباری.
+- گروه تازه اضافه‌شده تا تأیید مدیر ربات غیرفعال می‌ماند؛ مدیر درخواست تأیید را همراه نام گروه، شناسه، تعداد اعضا و لینک دعوت در صورت دسترس‌پذیری دریافت می‌کند. migration طوری تنظیم شده که گروه‌های موجود با وضعیت فعلی‌شان حفظ شوند.
+- نگهداری چند کلید xAI/Grok به‌صورت رمزگذاری‌شده در D1، اعتبارسنجی، فعال/غیرفعال‌سازی، حذف و fallback در خطای نرخ درخواست.
+- سازگاری موقت با کلید قدیمی `GROQ_API_KEY`؛ کلیدهای مدیریتی جدید برای xAI/Grok هستند.
+- عضویت اجباری اختیاری در کانال عمومی با بررسی وضعیت عضویت پیش از پردازش پیام گروه.
 
-## Privacy and isolation
+## معماری و حریم خصوصی
 
-- Every stored message is scoped to its Telegram chat ID.
-- Retrieval must always filter by chat ID; never search across groups for a group-level answer.
-- Do not commit bot tokens, Telegram API credentials, Telethon session files, exports, or production database data.
-- Prefer making this repository **Private** before adding implementation details or deployment configuration.
+- Worker: دریافت webhook تلگرام و اجرای منطق ربات.
+- D1: ذخیره گروه‌ها، کاربران، پیام‌ها، تنظیمات، نشست‌های واردسازی و کلیدهای رمزگذاری‌شده.
+- هر جست‌وجو باید با `chat_id` همان گروه محدود شود؛ جست‌وجوی بین‌گروهی ممنوع است.
+- کلیدهای API با AES-GCM رمزگذاری می‌شوند. `KEY_ENCRYPTION_SECRET` باید در Cloudflare به‌صورت Secret تنظیم شود و حداقل ۳۲ کاراکتر داشته باشد. تغییر این Secret بدون مهاجرت/رمزگذاری مجدد باعث غیرقابل‌خواندن شدن کلیدهای ذخیره‌شده می‌شود.
+- شناسه مدیران با `ADMIN_USER_IDS` تنظیم می‌شود؛ فقط این شناسه‌ها اجازه استفاده از پنل و تأیید گروه را دارند.
+- هرگز توکن ربات، کلیدهای API، نشست Telethon یا فایل تاریخچه واقعی را در GitHub commit نکن.
+- پیش از فعال کردن ذخیره‌سازی، اعضای گروه را از سیاست نگهداری پیام‌ها مطلع کن.
 
-## Local development
+## راه‌اندازی Cloudflare
 
-1. Install Node.js 20+ and npm.
-2. Install dependencies with `npm install`.
-3. Create a D1 database and set its ID in `wrangler.toml`.
-4. Copy `.dev.vars.example` to `.dev.vars` and fill in local-only values.
-5. Apply the schema using `npx wrangler d1 execute fun-bot-db --local --file=./schema.sql`.
-6. Run `npm run dev`.
+### ۱. Secrets و Variables
 
-## Telegram webhook
+در Cloudflare برو به **Workers & Pages → fun-bot → Settings → Variables and Secrets** و این موارد را تنظیم کن:
 
-Set `TELEGRAM_BOT_TOKEN` as a Worker secret, then deploy and configure Telegram's webhook to point to the deployed Worker URL plus `/webhook`. Set `BOT_USERNAME` as a regular Worker variable (without the leading @).
+**Secrets**
+- `TELEGRAM_BOT_TOKEN`: توکن BotFather.
+- `WEBHOOK_SECRET`: یک رشته تصادفی بلند که در تنظیم webhook تلگرام هم استفاده می‌شود.
+- `KEY_ENCRYPTION_SECRET`: رشته تصادفی محرمانه حداقل ۳۲ کاراکتری.
+- `XAI_API_KEY` (اختیاری): کلید ثابت xAI؛ ترجیحاً از پنل ربات و کلیدهای رمزگذاری‌شده استفاده کن.
+- `GROQ_API_KEY` (اختیاری، برای سازگاری قبلی): کلید Groq قدیمی.
 
-**Important:** Telegram's default group privacy mode prevents bots from receiving most ordinary group messages. To archive all eligible group messages, disable privacy mode for the bot through BotFather or make the bot an administrator with appropriate permissions. Confirm group members understand the message-retention policy before enabling collection.
+**Variables**
+- `ADMIN_USER_IDS`: شناسه عددی تلگرام مدیر یا چند مدیر، با کاما جداشده؛ مثال `123456789,987654321`.
+- `BOT_USERNAME`: نام کاربری ربات بدون `@`.
+- `XAI_MODEL`: پیش‌فرض `grok-3-mini`.
+- `GROQ_MODEL` (فقط برای کلید قدیمی Groq): پیش‌فرض `openai/gpt-oss-120b`.
 
-## Groq group replies
+برای ساخت کلید xAI فقط از [کنسول رسمی xAI](https://console.x.ai/) استفاده کن. کلید را در گروه ارسال نکن.
 
-- Set `GROQ_API_KEY` as a Cloudflare Worker **Secret** (never commit the key). The same key format used by the MafiaNew Groq integration works here; this bot uses Groq's chat-completions API, not the speech-to-text endpoint.
-- Optionally set `GROQ_MODEL` as a Worker variable. The default is `openai/gpt-oss-120b`.
-- The bot stores eligible group messages in D1 and replies only when directly mentioned or when a user replies to one of its messages. The model receives recent text history from that same chat only.
-- Telegram group privacy mode may prevent the bot from seeing regular group messages. Disable privacy mode with BotFather or grant the bot appropriate admin permissions if you intend to archive eligible group messages. Make sure group members know the retention policy.
+### ۲. اعمال دیتابیس
 
-## Current scope
+مخزن از `wrangler.toml` و D1 با نام `fun` استفاده می‌کند. پیش از تغییرات، از دیتابیس نسخه پشتیبان بگیر. migration جدید ستون تأیید و جدول‌های مدیریتی را اضافه می‌کند؛ گروه‌های موجود با وضعیت فعلی‌شان حفظ می‌شوند و گروه‌های تازه تا تأیید مدیر غیرفعال می‌مانند. سپس migration را اعمال کن:
 
-This repository contains the Worker, D1 schema, history-import scaffolding, and a first Groq-powered group-answer path. Semantic search, MTProto crawling, and further production hardening remain future work.
+```bash
+npx wrangler d1 migrations apply fun --remote
+```
 
-## تنظیم کلید API و واردسازی تاریخچه
+برای ساخت دیتابیس محلی تازه، از `schema.sql` استفاده کن:
 
-### ثبت کلید API
+```bash
+npx wrangler d1 execute fun --local --file=./schema.sql
+```
 
-- در گفتگوی خصوصی ربات دستور `/api` را بفرست؛ ربات لینک رسمی ساخت کلید Groq و مسیر تنظیم آن را نشان می‌دهد.
-- کلید را از [صفحه رسمی Groq API Keys](https://console.groq.com/keys) بساز.
-- در Cloudflare برو به **Workers & Pages → fun-bot → Settings → Variables and Secrets** و مقدار `GROQ_API_KEY` را به‌صورت **Secret** ثبت یا به‌روزرسانی کن، سپس نسخه Worker را Deploy کن.
-- کلید را برای ربات تلگرام نفرست و در GitHub یا فایل‌های مخزن قرار نده.
+### ۳. نصب و انتشار
 
-### واردسازی تاریخچه قدیمی گروه مستقیماً از تلگرام
+```bash
+npm install
+npm run typecheck
+npm run deploy
+```
 
-این قابلیت داخل Cloudflare Worker اجرا می‌شود؛ برای واردسازی تاریخچه لازم نیست Python، Wrangler یا مخزن را روی کامپیوتر اجرا کنی.
+Webhook را روی آدرس Worker به‌علاوه `/webhook` تنظیم کن و مقدار `WEBHOOK_SECRET` را در header با نام `X-Telegram-Bot-Api-Secret-Token` بفرست. endpoint ریشه `/` برای بررسی سلامت است.
 
-1. در گروه مقصد دستور `/history` را بفرست. ربات این درخواست را به حساب تلگرامی تو و همان گروه متصل می‌کند و ۳۰ دقیقه اعتبار دارد.
-2. در **Telegram Desktop** منوی گروه را باز کن و **Export chat history** را انتخاب کن. فرمت **JSON** را انتخاب و فایل `result.json` را ذخیره کن.
-3. فایل JSON را در گفتگوی خصوصی با همین ربات به‌صورت سند (Document) ارسال کن؛ خود فایل را به گروه نفرست.
-4. Worker فایل را از Telegram Bot API دریافت می‌کند، پیام‌ها را دسته‌ای به D1 وارد می‌کند و گزارش تعداد پیام‌های پردازش‌شده و بسته‌های ناموفق را در گفتگوی خصوصی می‌فرستد.
-5. پس از پایان واردسازی، ربات می‌تواند متن پیام‌های موجود در فایل را در پاسخ‌های گروه جست‌وجو کند.
+## استفاده از ربات
 
-**محدودیت‌ها و امنیت**
-- فقط فایل JSON خروجی Telegram Desktop پشتیبانی می‌شود؛ سقف حجم فعلی حدود ۱۹ مگابایت است.
-- درخواست واردسازی فقط برای حسابی که دستور `/history` را در گروه فرستاده و فقط تا ۳۰ دقیقه معتبر است.
-- پیام‌های تکراری با شناسه گروه و شناسه پیام یکتا شناسایی می‌شوند؛ اطلاعات گروه‌های دیگر با گروه مقصد مخلوط نمی‌شوند.
-- پیام‌هایی که در خروجی متن یا کپشن ندارند، برای جست‌وجوی متنی قابل استفاده نیستند.
-- قبل از ارسال، فایل خروجی را بررسی کن؛ Worker محتوای تاریخچه را برای واردسازی در دیتابیس خود پروژه ذخیره می‌کند.
+### پنل مدیر
+در پیوی ربات دستور `/manage` را بفرست. مدیر می‌تواند گروه‌ها را تأیید یا غیرفعال کند، کلیدهای AI را مدیریت کند و عضویت اجباری را روشن/خاموش کند.
+
+### اضافه‌کردن گروه
+پس از اضافه‌شدن ربات به گروه، ربات تا تأیید یکی از مدیران تنظیم‌شده در `ADMIN_USER_IDS` پاسخ نمی‌دهد و تاریخچه را پردازش نمی‌کند. برای ساخت لینک دعوت، ربات باید مجوز مناسب در گروه داشته باشد؛ در غیر این صورت لینک ممکن است در درخواست مدیر در دسترس نباشد.
+
+### ثبت تاریخچه قدیمی
+1. مدیر گروهِ تأییدشده دستور `/history` را در گروه می‌فرستد.
+2. تا ۳۰ دقیقه، در پیوی ربات چند فایل JSON، HTML یا TXT ارسال کند؛ متن ساده نیز پذیرفته می‌شود و هر خط یک پیام است.
+3. برای JSON خروجی Telegram Desktop، شناسه پیام‌های موجود برای جلوگیری از تکرار استفاده می‌شود. در TXT شناسه‌های مصنوعی ساخته می‌شوند، بنابراین ارسال دوباره همان متن به‌عنوان یک پیام تلگرامی جدید می‌تواند دوباره ثبت شود.
+4. سقف حجم فایل فعلی حدود ۱۹ مگابایت است. برای فایل‌های بزرگ‌تر تاریخچه را به چند قسمت تقسیم کن.
+
+### پاسخ هوشمند
+ربات فقط وقتی پاسخ می‌دهد که مستقیماً منشن شود یا کاربر به پیام ربات ریپلای کند. برای جمع‌آوری همه پیام‌های عادی، Privacy Mode را در BotFather غیرفعال کن یا دسترسی لازم را به ربات بده. دریافت پیام‌ها به تنظیمات تلگرام و مجوزهای گروه وابسته است.
+
+### عضویت اجباری
+از پنل مدیر یک کانال عمومی با نام کاربری مانند `@my_channel` تنظیم کن و سپس عضویت اجباری را روشن کن. ربات باید بتواند وضعیت عضویت را با `getChatMember` بررسی کند؛ برای نتیجه قابل اتکا، ربات را به کانال اضافه کن و دسترسی لازم را بده. پشتیبانی از لینک دعوت خصوصی که شناسه کانال از آن قابل استخراج نیست، نیازمند تنظیم جداگانه شناسه عددی کانال است.
+
+## محدودیت‌ها و نکات امنیتی
+
+- Cloudflare Worker برای پردازش webhook طراحی شده؛ خزیدن MTProto باید در یک فرایند جداگانه و با مجوز صریح اجرا شود.
+- فایل HTML بر اساس ساختار خروجی Telegram Desktop پردازش می‌شود؛ قالب‌های HTML سفارشی ممکن است نیاز به اصلاح parser داشته باشند.
+- جست‌وجوی فعلی متنی است (FTS5)، نه جست‌وجوی embedding/معنایی. در صورت نیاز می‌توان لایه embeddings را بعداً اضافه کرد.
+- کلیدهای ثبت‌شده در پنل در D1 رمزگذاری می‌شوند، اما برای امنیت بیشتر مخزن را Private نگه دار و دسترسی‌های Cloudflare/GitHub را محدود کن.

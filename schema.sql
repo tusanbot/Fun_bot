@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS groups (
   chat_id TEXT PRIMARY KEY,
   title TEXT,
   enabled INTEGER NOT NULL DEFAULT 1,
+  approved INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -32,14 +33,10 @@ CREATE TABLE IF NOT EXISTS messages (
   FOREIGN KEY (chat_id) REFERENCES groups(chat_id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_messages_chat_date
-  ON messages(chat_id, message_date);
-
-CREATE INDEX IF NOT EXISTS idx_messages_chat_user_date
-  ON messages(chat_id, user_id, message_date);
-
-CREATE INDEX IF NOT EXISTS idx_messages_chat_reply
-  ON messages(chat_id, reply_to_message_id);
+CREATE INDEX IF NOT EXISTS idx_messages_chat_date ON messages(chat_id, message_date);
+CREATE INDEX IF NOT EXISTS idx_messages_chat_user_date ON messages(chat_id, user_id, message_date);
+CREATE INDEX IF NOT EXISTS idx_messages_chat_reply ON messages(chat_id, reply_to_message_id);
+CREATE INDEX IF NOT EXISTS idx_groups_approved ON groups(approved, enabled);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
   text_content,
@@ -62,3 +59,29 @@ CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE OF text_content ON message
   VALUES ('delete', old.id, old.text_content);
   INSERT INTO messages_fts(rowid, text_content) VALUES (new.id, new.text_content);
 END;
+
+CREATE TABLE IF NOT EXISTS bot_settings (
+  setting_key TEXT PRIMARY KEY,
+  setting_value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  provider TEXT NOT NULL DEFAULT 'xai',
+  label TEXT NOT NULL,
+  encrypted_key TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  last_status TEXT NOT NULL DEFAULT 'unchecked',
+  last_error TEXT,
+  last_checked_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS admin_sessions (
+  user_id TEXT PRIMARY KEY,
+  action TEXT NOT NULL,
+  chat_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at TEXT NOT NULL
+);
