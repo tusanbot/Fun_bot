@@ -17,6 +17,7 @@ function getIntent(prompt: string): Intent | null {
   const musicSearch = text.match(/(?:جستجوی?\s*)?(?:آهنگ|موزیک|موسیقی)\s+(?:از|به نام|برای)?\s*(.{2,80})/i);
   if (musicSearch && !/یاب|تشخیص|اسم این|چی پیشنهاد/i.test(musicSearch[1])) return { key: "music:search:" + musicSearch[1].trim(), label: "جست‌وجوی موسیقی", path: "/soundcloud/search?s=" + encodeURIComponent(musicSearch[1].trim()), cacheSeconds: 1800 };
   const imageLink = text.match(/https?:\/\/\S+/i)?.[0]?.replace(/[),.]+$/, "");
+  if (/تشخیص موزیک|شازم|آهنگ.?یاب|اسم این آهنگ/i.test(text) && imageLink) return { key: "music:recognition:" + imageLink, label: "تشخیص موزیک", path: "/music/recognition?url=" + encodeURIComponent(imageLink), cacheSeconds: 3600 };
   if (/جیبلی|ghibli/i.test(text) && imageLink) return { key: "image:ghibli:" + imageLink, label: "تبدیل عکس به جیبلی", path: "/ai/ghibli?url=" + encodeURIComponent(imageLink), cacheSeconds: 3600 };
   if (/استخراج متن از عکس|متن داخل عکس|ocr/i.test(text) && imageLink) return { key: "image:ocr:" + imageLink, label: "استخراج متن از عکس", path: "/tools/extract-image-text?image=" + encodeURIComponent(imageLink), cacheSeconds: 3600 };
   if (/اخبار.?فوتبالی|خبر.?فوتبال|اخبار.?ورزشی/i.test(text)) return { key: "footballi:news", label: "اخبار فوتبالی", path: "/footballi?action=news", cacheSeconds: 600 };
@@ -45,8 +46,6 @@ function getIntent(prompt: string): Intent | null {
   if (/فال ابجد/i.test(text)) return { key: "fun:abjad", label: "فال ابجد", path: "/fun/fal/abjad", cacheSeconds: 3600 };
   if (/پروکسی سالم|لیست پروکسی|پروکسی تلگرام/i.test(text)) return { key: "tools:proxies", label: "فهرست پروکسی تلگرام", path: "/tools/proxies", cacheSeconds: 900 };
   if (/کانفیگ.?vless|کانفیگ.?vmess/i.test(text)) return { key: "tools:configs", label: "فهرست کانفیگ‌ها", path: "/tools/configs", cacheSeconds: 900 };
-  const musicUrl = text.match(/https?:\/\/\S+/i)?.[0];
-  if (/تشخیص موزیک|شازم|آهنگ.?یاب|اسم این آهنگ/i.test(text) && musicUrl) return { key: "music:recognition:" + musicUrl, label: "تشخیص موزیک", path: "/music/recognition?url=" + encodeURIComponent(musicUrl), cacheSeconds: 3600 };
   return null;
 }
 
