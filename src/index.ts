@@ -1,3 +1,5 @@
+import { fetchLiveDataContext } from "./live-data";
+
 interface Env {
   DB: D1Database;
   TELEGRAM_BOT_TOKEN: string;
@@ -5,6 +7,7 @@ interface Env {
   WEBHOOK_URL?: string;
   BOT_USERNAME: string;
   GROQ_API_KEY?: string;
+  API_FOOTBALL_KEY?: string;
   GROQ_MODEL?: string;
   XAI_API_KEY?: string;
   XAI_MODEL?: string;
@@ -836,6 +839,7 @@ async function generateGroqAnswer(
     ...recent.map((item) => describe(item, "تاریخچه اخیر")),
   ].join("\\n").slice(-12000);
 
+  const liveContext = await fetchLiveDataContext(prompt, env);
   const messages = [
     {
       role: "system",
@@ -847,6 +851,7 @@ async function generateGroqAnswer(
         "اطلاعات گروه‌های دیگر را هرگز وارد پاسخ نکن و واقعیت جعل نکن. پاسخ را طبیعی و نسبتاً مختصر بنوی.\n\n" +
         "تاریخچه و پیام‌های مرتبط همین گروه:\n" + (context || "پیام قبلی ذخیره‌شده‌ای برای این پرسش پیدا نشد."),
     },
+    ...(liveContext ? [{ role: "system" as const, content: "اطلاعات زیر داده ساختاریافته از منابع بیرونی است؛ آن را از تاریخچه گروه جدا نگه دار، برای پاسخ دقیق از آن استفاده کن، زمان و محدودیت تازگی را رعایت کن و هیچ قیمت یا نتیجه‌ای را فراتر از داده موجود ادعا نکن.\\n\\n" + liveContext }] : []),
     { role: "user", content: prompt.slice(0, 1800) },
   ];
   const credentials: Array<{provider:"xai"|"groq";key:string;id:number|null}> = [];
