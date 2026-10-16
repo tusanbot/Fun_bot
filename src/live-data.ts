@@ -73,8 +73,9 @@ async function marketContext(): Promise<string> {
   const lines: string[] = [];
   for (const [symbol, label] of wanted) {
     const item = items.find((candidate) => candidate.symbol === symbol);
+    const priceAge = item.timestamp ? Date.now() - Date.parse(item.timestamp) : Number.POSITIVE_INFINITY;
     if (!item || typeof item.price !== "number" || item.price <= 0 || item.stale === true ||
-        (item.quality ?? []).includes("stale")) continue;
+        (item.quality ?? []).includes("stale") || !Number.isFinite(priceAge) || priceAge < 0 || priceAge > 48 * 60 * 60 * 1000) continue;
     const timestamp = item.timestamp_jalali || item.timestamp || "زمان نامشخص";
     const change = typeof item.change_pct === "number"
       ? "؛ تغییر: " + (item.change_pct > 0 ? "+" : "") + formatNumber(item.change_pct) + "٪"
