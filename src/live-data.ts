@@ -10,7 +10,8 @@ const API_BASE = "https://api.majidapi.ir";
 function getIntent(prompt: string): Intent | null {
   const text = prompt.toLowerCase();
   const mobile = text.match(/(?:قیمت|نرخ)\s*(?:گوشی|موبایل)\s+(.+)/i);
-  if (mobile) return { key: "mobile:" + mobile[1].trim().slice(0, 60), label: "قیمت موبایل", path: "/price/mobile?model=" + encodeURIComponent(mobile[1].trim().slice(0, 60)), cacheSeconds: 600 };
+  if (mobile && !/^(?:چنده|چقدره|قیمت|چی|لطفا|رو بگو|را بگو)[؟?!.،\s]*$/i.test(mobile[1].trim())) return { key: "mobile:" + mobile[1].trim().slice(0, 60), label: "قیمت موبایل", path: "/price/mobile?model=" + encodeURIComponent(mobile[1].trim().slice(0, 60)), cacheSeconds: 600 };
+  if (/قیمت موبایل|قیمت گوشی|نرخ موبایل/i.test(text)) return { key: "mobile:brands", label: "برندهای موبایل", path: "/price/mobile?action=brands", cacheSeconds: 3600 };
 
   const titleMatch = text.match(/(?:جستجوی?\s*)?(?:فیلم|سریال)\s+(?:به نام\s+)?(.{2,80})/i);
   if (titleMatch && !/چی پیشنهاد|چه فیلم|چه سریال|قیمت|و سریال/i.test(titleMatch[1])) return { key: "movie:" + titleMatch[1].trim(), label: "جست‌وجوی فیلم و سریال", path: "/movie/movie4?action=search&s=" + encodeURIComponent(titleMatch[1].trim()) + "&page=1", cacheSeconds: 1800 };
