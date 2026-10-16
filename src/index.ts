@@ -214,7 +214,11 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
   const chatId = query.message?.chat.id ?? query.from.id;
   if (data === "private_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showPrivateMenu(env,chatId,query.from.id); }
   if (data === "help_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showHelp(env,chatId); }
-  if (data === "bot_admin_info") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"این بخش مخصوص مدیر کل ربات است.",show_alert:true}); return; }
+  if (data === "bot_admin_info") {
+    if (query.id.startsWith("reply-keyboard:")) await telegramApi(env,"sendMessage",{chat_id:chatId,text:"این بخش مخصوص مدیر کل ربات است."});
+    else await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"این بخش مخصوص مدیر کل ربات است.",show_alert:true});
+    return;
+  }
   if (data === "group_manage_list") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showUserGroups(env,chatId,query.from.id); }
   if (data.startsWith("group_settings:")) { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showGroupSettings(env,chatId,data.slice("group_settings:".length),query.from.id); }
   if (data.startsWith("group_memory:")) { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showGroupMemorySettings(env,chatId,data.slice("group_memory:".length),query.from.id); }
@@ -252,7 +256,8 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
     return;
   }
   if (!isAdmin(env, actor)) {
-    await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"دسترسی مدیر لازم است.",show_alert:true});
+    if (query.id.startsWith("reply-keyboard:")) await telegramApi(env,"sendMessage",{chat_id:chatId,text:"دسترسی مدیر لازم است."});
+    else await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"دسترسی مدیر لازم است.",show_alert:true});
     return;
   }
   await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id});
@@ -904,7 +909,12 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
         const member = channel ? await telegramApi<{status:string;is_member?:boolean}>(env, "getChatMember", {chat_id:channel,user_id:query.from.id}) : null;
         ok = !!member && (["creator","administrator","member"].includes(member.status) || (member.status === "restricted" && member.is_member === true));
       } catch {}
-      await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:ok ? "عضویت تأیید شد؛ حالا دوباره پیام بده." : "هنوز عضویت شما تأیید نشد.",show_alert:!ok});
+      const resultText = ok ? "عضویت تأیید شد؛ حالا دوباره پیام بده." : "هنوز عضویت شما تأیید نشد.";
+      if (query.id.startsWith("reply-keyboard:")) {
+        await telegramApi(env, "sendMessage", { chat_id: query.message?.chat.id ?? query.from.id, text: resultText });
+      } else {
+        await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:resultText,show_alert:!ok});
+      }
       return;
     }
     try {
