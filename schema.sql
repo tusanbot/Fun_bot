@@ -36,6 +36,16 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_chat_date ON messages(chat_id, message_date);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_user_date ON messages(chat_id, user_id, message_date);
 CREATE INDEX IF NOT EXISTS idx_messages_chat_reply ON messages(chat_id, reply_to_message_id);
+
+CREATE TABLE IF NOT EXISTS reply_keyboard_actions (
+  chat_id TEXT NOT NULL,
+  button_text TEXT NOT NULL,
+  callback_data TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (chat_id, button_text)
+);
+CREATE INDEX IF NOT EXISTS idx_reply_keyboard_actions_updated
+  ON reply_keyboard_actions(chat_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_groups_approved ON groups(approved, enabled);
 
 CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
