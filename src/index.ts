@@ -982,8 +982,8 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       });
       return;
     }
-    // Handle an active text-entry session before interpreting any keyboard label.
-    if (await processAdminPrivateMessage(env, message)) return;
+    // Route an exact Reply Keyboard label before consuming text as an active admin-session value.
+    // Otherwise a button tap could accidentally be stored as an API key or channel name.
     const mappedAction = await findReplyKeyboardAction(env, message.chat.id, privateMenuText);
     if (mappedAction && message.from) {
       await handleUpdate(env, {
@@ -997,6 +997,7 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       });
       return;
     }
+    if (await processAdminPrivateMessage(env, message)) return;
     if (privateMenuText === "راهنمای ربات") { await showHelp(env,message.chat.id); return; }
     if (privateMenuText === "مدیریت گروه‌ها" || privateMenuText === "مدیریت گروه‌ها (مدیر گروه)") { await showUserGroups(env,message.chat.id,message.from.id); return; }
     if (privateMenuText === "پنل مدیریت کل ربات") {
