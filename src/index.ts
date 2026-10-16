@@ -214,7 +214,11 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
   const chatId = query.message?.chat.id ?? query.from.id;
   if (data === "private_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showPrivateMenu(env,chatId,query.from.id); }
   if (data === "help_home") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showHelp(env,chatId); }
-  if (data === "bot_admin_info") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"این بخش مخصوص مدیر کل ربات است.",show_alert:true}); return; }
+  if (data === "bot_admin_info") {
+    if (query.id.startsWith("reply-keyboard:")) await telegramApi(env,"sendMessage",{chat_id:chatId,text:"این بخش مخصوص مدیر کل ربات است."});
+    else await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"این بخش مخصوص مدیر کل ربات است.",show_alert:true});
+    return;
+  }
   if (data === "group_manage_list") { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showUserGroups(env,chatId,query.from.id); }
   if (data.startsWith("group_settings:")) { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showGroupSettings(env,chatId,data.slice("group_settings:".length),query.from.id); }
   if (data.startsWith("group_memory:")) { await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id}); return showGroupMemorySettings(env,chatId,data.slice("group_memory:".length),query.from.id); }
@@ -252,7 +256,8 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
     return;
   }
   if (!isAdmin(env, actor)) {
-    await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"دسترسی مدیر لازم است.",show_alert:true});
+    if (query.id.startsWith("reply-keyboard:")) await telegramApi(env,"sendMessage",{chat_id:chatId,text:"دسترسی مدیر لازم است."});
+    else await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:"دسترسی مدیر لازم است.",show_alert:true});
     return;
   }
   await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id});
@@ -443,6 +448,78 @@ async function telegramApi<T>(
   method: string,
   body: Record<string, unknown>,
 ): Promise<T> {
+  // Reply-keyboard actions reuse the existing action handlers without calling Telegram's
+  // answerCallbackQuery API, because these actions arrive as ordinary text messages.
+  if (method === "answerCallbackQuery") {
+    const syntheticId = String(body.callback_query_id ?? "");
+    if (syntheticId.startsWith("reply-keyboard:")) {
+      const targetChatId = syntheticId.split(":")[1];
+      if (targetChatId && body.text) {
+        await telegramApi(env, "sendMessage", { chat_id: Number(targetChatId), text: String(body.text) });
+      }
+      return true as unknown as T;
+    }
+  }
+
+  if (method === "sendMessage") {
+    const markup = body.reply_markup as {
+      inline_keyboard?: Array<Array<{ text?: string; callback_data?: string; url?: string }>>;
+      keyboard?: unknown;
+    } | undefined;
+    const chatId = String(body.chat_id ?? "");
+    if (markup?.inline_keyboard) {
+      // Convert every inline keyboard into a normal Telegram Reply Keyboard. The mapping
+      // is stored per chat so button taps become ordinary text messages with a safe route.
+      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS reply_keyboard_actions (
+        chat_id TEXT NOT NULL,
+        button_text TEXT NOT NULL,
+        callback_data TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (chat_id, button_text)
+      )`).run();
+      await env.DB.prepare("DELETE FROM reply_keyboard_actions WHERE chat_id = ?").bind(chatId).run();
+
+      const usedLabels = new Set<string>();
+      const statements: D1PreparedStatement[] = [];
+      const keyboard: Array<Array<{ text: string }>> = [];
+      const links: string[] = [];
+      for (const row of markup.inline_keyboard) {
+        const keyboardRow: Array<{ text: string }> = [];
+        for (const button of row) {
+          const label = String(button.text ?? "گزینه").trim().slice(0, 64);
+          if (button.callback_data) {
+            let uniqueLabel = label || "گزینه";
+            let suffix = 2;
+            while (usedLabels.has(uniqueLabel)) {
+              const tail = ` · ${suffix++}`;
+              uniqueLabel = `${(label || "گزینه").slice(0, 64 - tail.length)}${tail}`;
+            }
+            usedLabels.add(uniqueLabel);
+            keyboardRow.push({ text: uniqueLabel });
+            statements.push(env.DB.prepare(
+              "INSERT INTO reply_keyboard_actions(chat_id,button_text,callback_data,updated_at) VALUES(?,?,?,datetime('now'))",
+            ).bind(chatId, uniqueLabel, button.callback_data));
+          } else if (button.url) {
+            links.push(`• ${label}: ${button.url}`);
+          }
+        }
+        if (keyboardRow.length) keyboard.push(keyboardRow);
+      }
+      if (statements.length) await env.DB.batch(statements);
+      if (links.length) body.text = `${String(body.text ?? "")}\n\nلینک‌های مرتبط:\n${links.join("\n")}`;
+      body.reply_markup = keyboard.length
+        ? { keyboard, resize_keyboard: true, is_persistent: true, input_field_placeholder: "برای ادامه یکی از گزینه‌ها را انتخاب کن" }
+        : { remove_keyboard: true };
+    } else if (markup?.keyboard) {
+      // A plain menu replaces any previous action keyboard in this chat.
+      try {
+        await env.DB.prepare("DELETE FROM reply_keyboard_actions WHERE chat_id = ?").bind(chatId).run();
+      } catch {
+        // The table is created lazily when the first inline keyboard is converted.
+      }
+    }
+  }
+
   const response = await fetch(
     `https://api.telegram.org/bot${env.TELEGRAM_BOT_TOKEN}/${method}`,
     {
@@ -461,6 +538,18 @@ async function telegramApi<T>(
     throw new Error(payload.description ?? `Telegram API error: ${method}`);
   }
   return payload.result;
+}
+
+async function findReplyKeyboardAction(env: Env, chatId: number, text: string): Promise<string | null> {
+  try {
+    const row = await env.DB.prepare(
+      "SELECT callback_data FROM reply_keyboard_actions WHERE chat_id = ? AND button_text = ? AND updated_at > datetime('now','-1 day')",
+    ).bind(String(chatId), text).first<{ callback_data: string }>();
+    return row?.callback_data ?? null;
+  } catch {
+    // Existing deployments may not have sent an inline keyboard since this migration was added.
+    return null;
+  }
 }
 
 function isExplicitlyAddressed(message: TelegramMessage, botUsername: string): boolean {
@@ -814,7 +903,7 @@ async function generateGroqAnswer(
 async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   if (update.callback_query) {
     const query = update.callback_query;
-    console.log("Telegram callback received", {
+    console.log(query.id.startsWith("reply-keyboard:") ? "Reply keyboard action received" : "Telegram callback received", {
       update_id: update.update_id,
       user_id: query.from.id,
       callback_data: query.data ?? "",
@@ -827,7 +916,12 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
         const member = channel ? await telegramApi<{status:string;is_member?:boolean}>(env, "getChatMember", {chat_id:channel,user_id:query.from.id}) : null;
         ok = !!member && (["creator","administrator","member"].includes(member.status) || (member.status === "restricted" && member.is_member === true));
       } catch {}
-      await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:ok ? "عضویت تأیید شد؛ حالا دوباره پیام بده." : "هنوز عضویت شما تأیید نشد.",show_alert:!ok});
+      const resultText = ok ? "عضویت تأیید شد؛ حالا دوباره پیام بده." : "هنوز عضویت شما تأیید نشد.";
+      if (query.id.startsWith("reply-keyboard:")) {
+        await telegramApi(env, "sendMessage", { chat_id: query.message?.chat.id ?? query.from.id, text: resultText });
+      } else {
+        await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id,text:resultText,show_alert:!ok});
+      }
       return;
     }
     try {
@@ -888,6 +982,22 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       });
       return;
     }
+    // Route an exact Reply Keyboard label before consuming text as an active admin-session value.
+    // Otherwise a button tap could accidentally be stored as an API key or channel name.
+    const mappedAction = await findReplyKeyboardAction(env, message.chat.id, privateMenuText);
+    if (mappedAction && message.from) {
+      await handleUpdate(env, {
+        update_id: update.update_id,
+        callback_query: {
+          id: `reply-keyboard:${message.chat.id}:${update.update_id ?? message.message_id}`,
+          from: message.from,
+          data: mappedAction,
+          message,
+        },
+      });
+      return;
+    }
+    if (await processAdminPrivateMessage(env, message)) return;
     if (privateMenuText === "راهنمای ربات") { await showHelp(env,message.chat.id); return; }
     if (privateMenuText === "مدیریت گروه‌ها" || privateMenuText === "مدیریت گروه‌ها (مدیر گروه)") { await showUserGroups(env,message.chat.id,message.from.id); return; }
     if (privateMenuText === "پنل مدیریت کل ربات") {
@@ -896,7 +1006,21 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       return;
     }
     if (privateMenuText === "/help") { await showHelp(env,message.chat.id); return; }
-    if (await processAdminPrivateMessage(env, message)) return;
+  }
+  if (message.chat.type !== "private" && message.from && privateMenuText) {
+    const mappedAction = await findReplyKeyboardAction(env, message.chat.id, privateMenuText);
+    if (mappedAction) {
+      await handleUpdate(env, {
+        update_id: update.update_id,
+        callback_query: {
+          id: `reply-keyboard:${message.chat.id}:${update.update_id ?? message.message_id}`,
+          from: message.from,
+          data: mappedAction,
+          message,
+        },
+      });
+      return;
+    }
   }
   const command = rawText.trim().split(/\s+/, 1)[0].split("@")[0].toLowerCase();
   if (message.chat.type !== "private") {
