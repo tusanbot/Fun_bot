@@ -8,6 +8,7 @@ interface Env {
   BOT_USERNAME: string;
   GROQ_API_KEY?: string;
   API_FOOTBALL_KEY?: string;
+  MAJID_API_TOKEN?: string;
   GROQ_MODEL?: string;
   XAI_API_KEY?: string;
   XAI_MODEL?: string;
@@ -905,6 +906,116 @@ async function generateGroqAnswer(
   return answer.slice(0, 3900);
 }
 
+
+function tehranDateKey(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Tehran", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date());
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? "00";
+  return part("year") + "-" + part("month") + "-" + part("day");
+}
+
+async function acquireMajidApiSlot(env: Env): Promise<boolean> {
+  try {
+    const result = await env.DB.prepare(
+      "INSERT INTO bot_settings(setting_key, setting_value, updated_at) VALUES('majidapi:last_request', ?, datetime('now')) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value, updated_at=datetime('now') WHERE datetime(bot_settings.updated_at, '+60 seconds') <= datetime('now')",
+    ).bind(String(Date.now())).run();
+    return (result.meta?.changes ?? 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+function findImageUrl(value: unknown, depth = 0): string | null {
+  if (depth > 5 || value === null || value === undefined) return null;
+  if (typeof value === "string") {
+    if (/^https:\/\/\S+\.(?:png|jpe?g|webp)(?:\?\S*)?$/i.test(value)) return value;
+    if (/^https:\/\/\S+/i.test(value) && /image|photo|result|output|url/i.test(value)) return value;
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value.slice(0, 20)) {
+      const found = findImageUrl(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    for (const key of ["image_url", "imageUrl", "photo_url", "url", "image", "photo", "result", "output", "data"]) {
+      if (key in record) {
+        const found = findImageUrl(record[key], depth + 1);
+        if (found) return found;
+      }
+    }
+  }
+  return null;
+}
+
+async function handleImageCommand(env: Env, message: TelegramMessage, rawText: string): Promise<void> {
+  const prompt = rawText.replace(/^\/(?:image|imagine)(?:@\w+)?\s*/i, "").trim();
+  const reply = (text: string) => telegramApi(env, "sendMessage", {
+    chat_id: message.chat.id, text,
+    reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+  }).then(() => undefined);
+  if (!prompt) {
+    await reply("برای ساخت تصویر بنویس:\n/image توضیح تصویری که می‌خواهی ساخته شود\n\nمثال: /image یک گربه فضانورد در سبک نقاشی آبرنگ");
+    return;
+  }
+  if (!env.MAJID_API_TOKEN) {
+    await reply("برای ساخت تصویر، ابتدا توکن Majid API را با نام MAJID_API_TOKEN در Secrets تنظیم کن.");
+    return;
+  }
+  const scope = message.chat.type === "private"
+    ? "user:" + String(message.from?.id ?? message.chat.id)
+    : "group:" + String(message.chat.id);
+  const quotaKey = "image_quota:generate:" + scope + ":" + tehranDateKey();
+  try {
+    const reservation = await env.DB.prepare(
+      "INSERT INTO bot_settings(setting_key, setting_value, updated_at) VALUES(?, 'reserved', datetime('now')) ON CONFLICT(setting_key) DO NOTHING",
+    ).bind(quotaKey).run();
+    if ((reservation.meta?.changes ?? 0) === 0) {
+      await reply("سهمیه ساخت تصویر امروز این گروه مصرف شده است. برای هر گروه روزانه فقط یک تصویر قابل ساخت است؛ فردا دوباره امتحان کن.");
+      return;
+    }
+    if (!await acquireMajidApiSlot(env)) {
+      await env.DB.prepare("DELETE FROM bot_settings WHERE setting_key=? AND setting_value='reserved'").bind(quotaKey).run();
+      await reply("سهمیه درخواست Majid API فعلاً در دسترس نیست (پلن رایگان یک درخواست در دقیقه). سهمیه تصویرت مصرف نشد؛ حدود یک دقیقه دیگر دوباره امتحان کن.");
+      return;
+    }
+    const url = new URL("/ai/image", "https://api.majidapi.ir");
+    url.searchParams.set("prompt", prompt.slice(0, 900));
+    url.searchParams.set("token", env.MAJID_API_TOKEN);
+    const response = await fetch(url.toString(), { headers: { accept: "application/json, image/*" }, signal: AbortSignal.timeout(55000) });
+    if (!response.ok) throw new Error("Image API HTTP " + response.status);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (contentType.startsWith("image/")) {
+      const blob = await response.blob();
+      const form = new FormData();
+      form.append("chat_id", String(message.chat.id));
+      form.append("caption", "تصویر ساخته‌شده با هوش مصنوعی");
+      form.append("photo", blob, "memora-generated.png");
+      const sent = await fetch("https://api.telegram.org/bot" + env.TELEGRAM_BOT_TOKEN + "/sendPhoto", { method: "POST", body: form });
+      if (!sent.ok) throw new Error("Telegram sendPhoto HTTP " + sent.status);
+      const result = await sent.json() as { ok?: boolean; description?: string };
+      if (!result.ok) throw new Error(result.description ?? "Telegram rejected generated image");
+    } else {
+      const payload = await response.json() as unknown;
+      const imageUrl = findImageUrl(payload);
+      if (!imageUrl) throw new Error("Image API response did not contain a supported image URL");
+      await telegramApi(env, "sendPhoto", {
+        chat_id: message.chat.id, photo: imageUrl, caption: "تصویر ساخته‌شده با هوش مصنوعی",
+        reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+      });
+    }
+    await env.DB.prepare("UPDATE bot_settings SET setting_value='used', updated_at=datetime('now') WHERE setting_key=?").bind(quotaKey).run();
+  } catch (error) {
+    try { await env.DB.prepare("DELETE FROM bot_settings WHERE setting_key=? AND setting_value='reserved'").bind(quotaKey).run(); } catch {}
+    console.error("Image generation failed", error instanceof Error ? error.message : "unknown error");
+    await reply("ساخت تصویر انجام نشد؛ سهمیه روزانه‌ات آزاد شد. ممکن است سرویس Majid API یا خروجی تصویر موقتاً در دسترس نباشد.");
+  }
+}
+
 async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   if (update.callback_query) {
     const query = update.callback_query;
@@ -1028,6 +1139,25 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     }
   }
   const command = rawText.trim().split(/\s+/, 1)[0].split("@")[0].toLowerCase();
+
+  if (command === "/id" || command === "/myid" || command === "/userid") {
+    const target = message.reply_to_message?.from ?? message.from;
+    const lines = [
+      target ? "شناسه عددی کاربر: " + target.id : "",
+      target?.username ? "نام کاربری: @" + target.username : "",
+      "شناسه این گفتگو: " + message.chat.id,
+    ].filter(Boolean);
+    await telegramApi(env, "sendMessage", {
+      chat_id: message.chat.id, text: lines.join("\n"),
+      reply_parameters: { message_id: message.message_id, allow_sending_without_reply: true },
+    });
+    return;
+  }
+
+  if (command === "/image" || command === "/imagine") {
+    await handleImageCommand(env, message, rawText);
+    return;
+  }
   if (message.chat.type !== "private") {
     if (message.new_chat_members?.some((member) => member.username?.toLowerCase() === env.BOT_USERNAME.replace(/^@/,"").toLowerCase())) {
       await notifyGroupPending(env,message);
