@@ -14,6 +14,8 @@ function getIntent(prompt: string): Intent | null {
   if (/ورزش\s*3|ورزش سه|varzesh3/i.test(text)) return { key: "varzesh3:live", label: "نتایج زنده ورزش سه", path: "/varzesh3?action=liveScore", cacheSeconds: 90 };
   if (/فوتبال\s*360|football\s*360/i.test(text)) return { key: "football360:live", label: "فوتبال ۳۶۰", path: "/football360?action=live", cacheSeconds: 90 };
   if (/فوتبال|نتیجه.?بازی|بازی.?چند.?چنده|چند.?چند|اسکور|مسابقه زنده|لیگ قهرمانان|پریمیر لیگ|رئال|بارسلونا|منچستر|استقلال|پرسپولیس|آرسنال|لیورپول/i.test(text)) return { key: "football360:live", label: "نتایج زنده فوتبال ۳۶۰", path: "/football360?action=live", cacheSeconds: 90 };
+
+  if (/اخبار.?فوتبالی|خبر.?فوتبال|اخبار.?ورزشی/i.test(text)) return { key: "footballi:news", label: "اخبار فوتبالی", path: "/footballi?action=news", cacheSeconds: 600 };
   if (/اخبار|خبرهای|آخرین خبر/i.test(text)) return { key: "news:latest", label: "آخرین اخبار", path: "/news/akharinkhabar?action=latest&page=1", cacheSeconds: 600 };
   if (/مناسبت.?های ماه|مناسبت.?های این ماه|مناسبت.?ماه/i.test(text)) return { key: "occasions:month", label: "مناسبت‌های ماه", path: "/tools/occasions", cacheSeconds: 3600 };
   if (/قیمت.?طلا|طلای ۱۸|طلای 18|سکه|قیمت.?بازار طلا/i.test(text)) return { key: "prices:gold", label: "قیمت طلا و سکه", path: "/prices?action=gold", cacheSeconds: 300 };
@@ -26,6 +28,10 @@ function getIntent(prompt: string): Intent | null {
     return { key: "weather:" + cities[city], label: "آب‌وهوای " + city, path: "/tools/weather?city=" + cities[city], cacheSeconds: 900 };
   }
   if (/فال قهوه|قهوه سه نشان/i.test(text)) return { key: "fun:coffee", label: "فال قهوه سه نشان", path: "/fun/fal/coffee", cacheSeconds: 3600 };
+
+  if (/تاروت|فال تاروت/i.test(text)) return { key: "fun:tarot", label: "فال تاروت", path: "/fun/taroot", cacheSeconds: 3600 };
+  if (/معما|چیستان|معمایی/i.test(text)) return { key: "fun:riddle", label: "معما و چیستان", path: "/fun/moama", cacheSeconds: 3600 };
+  if (/شعر|شعر رندوم|یک شعر/i.test(text)) return { key: "fun:poem", label: "شعر", path: "/fun/poem", cacheSeconds: 3600 };
   if (/فال حافظ|دیوان حافظ|غزل حافظ/i.test(text)) return { key: "fun:hafez", label: "دیوان حافظ", path: "/fun/divan-hafez?no=1", cacheSeconds: 3600 };
   if (/فال ابجد/i.test(text)) return { key: "fun:abjad", label: "فال ابجد", path: "/fun/fal/abjad", cacheSeconds: 3600 };
   if (/پروکسی سالم|لیست پروکسی|پروکسی تلگرام/i.test(text)) return { key: "tools:proxies", label: "فهرست پروکسی تلگرام", path: "/tools/proxies", cacheSeconds: 900 };
