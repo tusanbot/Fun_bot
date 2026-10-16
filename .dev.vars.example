@@ -11,3 +11,6 @@ XAI_MODEL=grok-3-mini
 # Optional legacy compatibility:
 GROQ_API_KEY=
 GROQ_MODEL=openai/gpt-oss-120b
+
+# Majid API token for live data and AI image generation; configure as a Worker Secret.
+MAJID_API_TOKEN=
