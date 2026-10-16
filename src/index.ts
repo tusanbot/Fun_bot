@@ -1300,7 +1300,24 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       return;
     }
   }
-  if (message.chat.type === "private") return;
+  if (message.chat.type === "private") {
+    const privateCommand = rawText.trim().split(/\s+/, 1)[0].split("@")[0].toLowerCase();
+    if (privateCommand === "/id" || privateCommand === "/myid" || privateCommand === "/userid") {
+      const target = message.reply_to_message?.from ?? message.from;
+      const lines = [
+        target ? "شناسه عددی کاربر: " + target.id : "",
+        target?.username ? "نام کاربری: @" + target.username : "",
+        "شناسه این گفتگو: " + message.chat.id,
+      ].filter(Boolean);
+      await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: lines.join("\n") });
+      return;
+    }
+    if (privateCommand === "/image" || privateCommand === "/imagine") {
+      await handleImageCommand(env, message, rawText);
+      return;
+    }
+    return;
+  }
 
   await saveMessage(env, message);
   if (!isExplicitlyAddressed(message, env.BOT_USERNAME)) return;
