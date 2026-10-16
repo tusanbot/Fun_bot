@@ -11,11 +11,20 @@ function getIntent(prompt: string): Intent | null {
   const text = prompt.toLowerCase();
   const mobile = text.match(/(?:قیمت|نرخ)\s*(?:گوشی|موبایل)\s+(.+)/i);
   if (mobile) return { key: "mobile:" + mobile[1].trim().slice(0, 60), label: "قیمت موبایل", path: "/price/mobile?model=" + encodeURIComponent(mobile[1].trim().slice(0, 60)), cacheSeconds: 600 };
+
+  const titleMatch = text.match(/(?:جستجوی?\\s*)?(?:فیلم|سریال)\\s+(?:به نام\\s+)?(.{2,80})/i);
+  if (titleMatch && !/چی پیشنهاد|چه فیلم|چه سریال|قیمت|و سریال/i.test(titleMatch[1])) return { key: "movie:" + titleMatch[1].trim(), label: "جست‌وجوی فیلم و سریال", path: "/movie/movie4?action=search&s=" + encodeURIComponent(titleMatch[1].trim()) + "&page=1", cacheSeconds: 1800 };
+  const musicSearch = text.match(/(?:جستجوی?\\s*)?(?:آهنگ|موزیک|موسیقی)\\s+(?:از|به نام|برای)?\\s*(.{2,80})/i);
+  if (musicSearch && !/یاب|تشخیص|اسم این|چی پیشنهاد/i.test(musicSearch[1])) return { key: "music:search:" + musicSearch[1].trim(), label: "جست‌وجوی موسیقی", path: "/soundcloud/search?s=" + encodeURIComponent(musicSearch[1].trim()), cacheSeconds: 1800 };
+  const imageLink = text.match(/https?:\\/\\/\\S+/i)?.[0]?.replace(/[),.]+$/, "");
+  if (/جیبلی|ghibli/i.test(text) && imageLink) return { key: "image:ghibli:" + imageLink, label: "تبدیل عکس به جیبلی", path: "/ai/ghibli?url=" + encodeURIComponent(imageLink), cacheSeconds: 3600 };
+  if (/استخراج متن از عکس|متن داخل عکس|ocr/i.test(text) && imageLink) return { key: "image:ocr:" + imageLink, label: "استخراج متن از عکس", path: "/tools/extract-image-text?image=" + encodeURIComponent(imageLink), cacheSeconds: 3600 };
+  if (/اخبار.?فوتبالی|خبر.?فوتبال|اخبار.?ورزشی/i.test(text)) return { key: "footballi:news", label: "اخبار فوتبالی", path: "/footballi?action=news", cacheSeconds: 600 };
   if (/ورزش\s*3|ورزش سه|varzesh3/i.test(text)) return { key: "varzesh3:live", label: "نتایج زنده ورزش سه", path: "/varzesh3?action=liveScore", cacheSeconds: 90 };
   if (/فوتبال\s*360|football\s*360/i.test(text)) return { key: "football360:live", label: "فوتبال ۳۶۰", path: "/football360?action=live", cacheSeconds: 90 };
   if (/فوتبال|نتیجه.?بازی|بازی.?چند.?چنده|چند.?چند|اسکور|مسابقه زنده|لیگ قهرمانان|پریمیر لیگ|رئال|بارسلونا|منچستر|استقلال|پرسپولیس|آرسنال|لیورپول/i.test(text)) return { key: "football360:live", label: "نتایج زنده فوتبال ۳۶۰", path: "/football360?action=live", cacheSeconds: 90 };
 
-  if (/اخبار.?فوتبالی|خبر.?فوتبال|اخبار.?ورزشی/i.test(text)) return { key: "footballi:news", label: "اخبار فوتبالی", path: "/footballi?action=news", cacheSeconds: 600 };
+
   if (/اخبار|خبرهای|آخرین خبر/i.test(text)) return { key: "news:latest", label: "آخرین اخبار", path: "/news/akharinkhabar?action=latest&page=1", cacheSeconds: 600 };
   if (/مناسبت.?های ماه|مناسبت.?های این ماه|مناسبت.?ماه/i.test(text)) return { key: "occasions:month", label: "مناسبت‌های ماه", path: "/tools/occasions", cacheSeconds: 3600 };
   if (/قیمت.?طلا|طلای ۱۸|طلای 18|سکه|قیمت.?بازار طلا/i.test(text)) return { key: "prices:gold", label: "قیمت طلا و سکه", path: "/prices?action=gold", cacheSeconds: 300 };
