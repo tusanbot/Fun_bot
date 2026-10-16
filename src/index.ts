@@ -2,6 +2,7 @@ interface Env {
   DB: D1Database;
   TELEGRAM_BOT_TOKEN: string;
   WEBHOOK_SECRET: string;
+  WEBHOOK_URL?: string;
   BOT_USERNAME: string;
   GROQ_API_KEY?: string;
   GROQ_MODEL?: string;
@@ -327,6 +328,7 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
     }
     return showKeys(env,chatId);
   }
+  await telegramApi(env,"sendMessage",{chat_id:chatId,text:`این دکمه دیگر شناخته نمی‌شود (${data.slice(0,80)}). منوی فعلی را دوباره باز کن: /manage`});
 }
 async function processAdminPrivateMessage(env: Env, message: TelegramMessage): Promise<boolean> {
   if (message.chat.type !== "private" || !message.from) return false;
@@ -855,6 +857,37 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   const privateMenuText = rawText.trim();
   if (message.chat.type === "private" && message.from) {
     console.log("Private Telegram message received", { update_id: update.update_id, user_id: message.from.id, text: privateMenuText.startsWith("/") ? privateMenuText.split(/\s+/, 1)[0] : privateMenuText.slice(0, 80) });
+    if (privateMenuText === "/setupwebhook" || privateMenuText === "/webhook_status") {
+      if (!isAdmin(env, message.from.id)) {
+        await telegramApi(env, "sendMessage", { chat_id: message.chat.id, text: "این دستور فقط برای مدیر کل ربات فعال است." });
+        return;
+      }
+      if (privateMenuText === "/setupwebhook") {
+        await telegramApi(env, "setWebhook", {
+          url: env.WEBHOOK_URL || "https://fun-bot.mshmahyar9.workers.dev/webhook",
+          secret_token: env.WEBHOOK_SECRET,
+          allowed_updates: ["message", "edited_message", "callback_query"],
+          drop_pending_updates: false,
+        });
+      }
+      const webhook = await telegramApi<{url:string;allowed_updates?:string[];pending_update_count:number;last_error_message?:string}>(env, "getWebhookInfo", {});
+      const allowed = webhook.allowed_updates ?? [];
+      await telegramApi(env, "sendMessage", {
+        chat_id: message.chat.id,
+        text: [
+          privateMenuText === "/setupwebhook" ? "وبهوک دوباره تنظیم شد." : "وضعیت فعلی وبهوک:",
+          `URL: ${webhook.url || "تنظیم نشده"}`,
+          `دریافت callback_query: ${allowed.includes("callback_query") ? "فعال" : "غیرفعال"}`,
+          `رویدادهای مجاز: ${allowed.join(", ") || "پیش‌فرض تلگرام"}`,
+          `به‌روزرسانی‌های در انتظار: ${webhook.pending_update_count}`,
+          webhook.last_error_message ? `آخرین خطای تلگرام: ${webhook.last_error_message}` : "",
+          privateMenuText === "/setupwebhook" && !allowed.includes("callback_query")
+            ? "هشدار: تلگرام callback_query را در فهرست مجاز گزارش نکرد؛ دوباره /setupwebhook را اجرا کن."
+            : "",
+        ].filter(Boolean).join("\n"),
+      });
+      return;
+    }
     if (privateMenuText === "راهنمای ربات") { await showHelp(env,message.chat.id); return; }
     if (privateMenuText === "مدیریت گروه‌ها" || privateMenuText === "مدیریت گروه‌ها (مدیر گروه)") { await showUserGroups(env,message.chat.id,message.from.id); return; }
     if (privateMenuText === "پنل مدیریت کل ربات") {
