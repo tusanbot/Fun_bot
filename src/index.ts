@@ -929,9 +929,7 @@ async function acquireMajidApiSlot(env: Env): Promise<boolean> {
 function findImageUrl(value: unknown, depth = 0): string | null {
   if (depth > 5 || value === null || value === undefined) return null;
   if (typeof value === "string") {
-    if (/^https:\/\/\S+\.(?:png|jpe?g|webp)(?:\?\S*)?$/i.test(value)) return value;
-    if (/^https:\/\/\S+/i.test(value) && /image|photo|result|output|url/i.test(value)) return value;
-    return null;
+    return /^https?:\/\/\S+/i.test(value) ? value : null;
   }
   if (Array.isArray(value)) {
     for (const item of value.slice(0, 20)) {
