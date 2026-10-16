@@ -15,7 +15,7 @@ function getIntent(prompt: string): Intent | null {
   const titleMatch = text.match(/(?:جستجوی?\s*)?(?:فیلم|سریال)\s+(?:به نام\s+)?(.{2,80})/i);
   if (titleMatch && !/چی پیشنهاد|چه فیلم|چه سریال|قیمت|و سریال/i.test(titleMatch[1])) return { key: "movie:" + titleMatch[1].trim(), label: "جست‌وجوی فیلم و سریال", path: "/movie/movie4?action=search&s=" + encodeURIComponent(titleMatch[1].trim()) + "&page=1", cacheSeconds: 1800 };
   const musicSearch = text.match(/(?:جستجوی?\s*(?:آهنگ|موزیک|موسیقی)|(?:آهنگ|موزیک|موسیقی)\s+(?:از|به نام))\s*(.{2,80})/i);
-  if (musicSearch && !/یاب|تشخیص|اسم این|چی پیشنهاد/i.test(musicSearch[1])) return { key: "music:search:" + musicSearch[1].trim(), label: "جست‌وجوی موسیقی", path: "/soundcloud/search?s=" + encodeURIComponent(musicSearch[1].trim()), cacheSeconds: 1800 };
+  if (musicSearch && !/یاب|تشخیص موزیک|شازم|اسم این آهنگ|چی پیشنهاد/i.test(text)) return { key: "music:search:" + musicSearch[1].trim(), label: "جست‌وجوی موسیقی", path: "/soundcloud/search?s=" + encodeURIComponent(musicSearch[1].trim()), cacheSeconds: 1800 };
   const imageLink = text.match(/https?:\/\/\S+/i)?.[0]?.replace(/[),.]+$/, "");
 
   const allLinks = [...text.matchAll(/https?:\/\/\S+/ig)].map((match) => match[0].replace(/[),.]+$/, ""));
