@@ -19,6 +19,18 @@ function getIntent(prompt: string): Intent | null {
   const imageLink = text.match(/https?:\/\/\S+/i)?.[0]?.replace(/[),.]+$/, "");
 
   const allLinks = [...text.matchAll(/https?:\/\/\S+/ig)].map((match) => match[0].replace(/[),.]+$/, ""));
+
+  if (/دانلود/i.test(text) && imageLink) {
+    if (/instagram\\.com|instagr\\.am/i.test(imageLink)) return { key: "social:instagram:" + imageLink, label: "دانلود از اینستاگرام", path: "/instagram/download?url=" + encodeURIComponent(imageLink) + "&out=url", cacheSeconds: 1800 };
+    if (/tiktok\\.com|vm\\.tiktok/i.test(imageLink)) return { key: "social:tiktok:" + imageLink, label: "دانلود از تیک‌تاک", path: "/tiktok/download?url=" + encodeURIComponent(imageLink), cacheSeconds: 1800 };
+    if (/facebook\\.com|fb\\.watch/i.test(imageLink)) return { key: "social:facebook:" + imageLink, label: "دانلود از فیسبوک", path: "/social/facebook?url=" + encodeURIComponent(imageLink), cacheSeconds: 1800 };
+    if (/twitter\\.com|x\\.com/i.test(imageLink)) return { key: "social:x:" + imageLink, label: "دانلود از X", path: "/social/x?url=" + encodeURIComponent(imageLink), cacheSeconds: 1800 };
+    if (/pin\\.it|pinterest\\.com/i.test(imageLink)) return { key: "social:pinterest:" + imageLink, label: "دانلود از پینترست", path: "/social/pinterest?action=download&url=" + encodeURIComponent(imageLink), cacheSeconds: 1800 };
+  }
+  const distance = text.match(/(?:مسافت|فاصله)\\s+(?:بین\\s+)?(.{2,40}?)\\s+(?:تا|و)\\s+(.{2,40}?)(?:\\s+(?:چقدر|چند|است|هست|می‌شود|می شه)\\??)?$/i);
+  if (distance) return { key: "distance:" + distance[1].trim() + ":" + distance[2].trim(), label: "فاصله بین دو شهر", path: "/tools/cities/distance?c1=" + encodeURIComponent(distance[1].trim()) + "&c2=" + encodeURIComponent(distance[2].trim()), cacheSeconds: 86400 };
+  const horoscope = text.match(/طالع.?بینی.*?نام\\s*[:：]?\\s*([\\p{L}]{2,30}).*?(?:مادر|نام مادر)\\s*[:：]?\\s*([\\p{L}]{2,30})(?:.*?(زن|مرد|دختر|پسر))?/iu);
+  if (horoscope) return { key: "horoscope:" + horoscope[1] + ":" + horoscope[2], label: "طالع‌بینی", path: "/fun/talebini?name=" + encodeURIComponent(horoscope[1]) + "&mother=" + encodeURIComponent(horoscope[2]) + "&gender=" + (/زن|دختر/i.test(horoscope[3] ?? "") ? "female" : "male"), cacheSeconds: 3600 };
   if (/تبدیل.*پی.?دی.?اف.*ورد|pdf.*to.*word/i.test(text) && allLinks.some((link) => /\.pdf(?:\?|$)/i.test(link))) {
     const pdf = allLinks.find((link) => /\.pdf(?:\?|$)/i.test(link))!;
     return { key: "pdf2docx:" + pdf, label: "تبدیل PDF به Word", path: "/tools/pdf2docx?pdf=" + encodeURIComponent(pdf), cacheSeconds: 3600 };
