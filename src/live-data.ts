@@ -73,6 +73,8 @@ function getIntent(prompt: string): Intent | null {
   if (/فال حافظ/i.test(text)) return { key: "fun:hafez", label: "فال حافظ", path: "/fun/fal?type=text", cacheSeconds: 3600 };
   if (/دیوان حافظ|غزل حافظ/i.test(text)) return { key: "fun:hafez:divan", label: "دیوان حافظ", path: "/fun/divan-hafez?no=" + (1 + Math.floor(Math.random() * 495)), cacheSeconds: 3600 };
   if (/فال ابجد/i.test(text)) return { key: "fun:abjad", label: "فال ابجد", path: "/fun/fal/abjad", cacheSeconds: 3600 };
+  if (/عکس پروفایل|پروفایل رندوم|عکس پروفایل رندوم/i.test(text)) return { key: "fun:profile", label: "عکس پروفایل", path: "/fun/profile?action=random", cacheSeconds: 3600 };
+  if (/جوک|لطیفه/i.test(text)) return { key: "fun:joke", label: "جوک", path: "/fun/joke", cacheSeconds: 3600 };
   if (/پروکسی سالم|لیست پروکسی|پروکسی تلگرام/i.test(text)) return { key: "tools:proxies", label: "فهرست پروکسی تلگرام", path: "/tools/proxies", cacheSeconds: 900 };
   if (/کانفیگ.?vless|کانفیگ.?vmess/i.test(text)) return { key: "tools:configs", label: "فهرست کانفیگ‌ها", path: "/tools/configs", cacheSeconds: 900 };
   return null;
