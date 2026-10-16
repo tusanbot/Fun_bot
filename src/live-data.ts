@@ -29,20 +29,20 @@ function getIntent(prompt: string): Intent | null {
   if (/افزایش کیفیت عکس|بهبود کیفیت عکس|واضح.?تر کردن عکس/i.test(text) && imageLink) {
     return { key: "image:enhancer:" + imageLink, label: "افزایش کیفیت عکس", path: "/image/enhancer?image=" + encodeURIComponent(imageLink) + "&out=url", cacheSeconds: 3600 };
   }
-  if (/گفتار به متن|تبدیل صدا به متن|پیاده.?سازی صوت/i.test(text) && imageLink && /\\.(?:mp3|ogg|oga|wav|m4a)(?:\\?|$)/i.test(imageLink)) {
+  if (/گفتار به متن|تبدیل صدا به متن|پیاده.?سازی صوت/i.test(text) && imageLink && /\.(?:mp3|ogg|oga|wav|m4a)(?:\?|$)/i.test(imageLink)) {
     return { key: "stt:" + imageLink, label: "تبدیل گفتار به متن", path: "/ai/stt?url=" + encodeURIComponent(imageLink), cacheSeconds: 3600 };
   }
-  const dateMatch = text.match(/(\\d{4}[/-]\\d{1,2}[/-]\\d{1,2})/);
+  const dateMatch = text.match(/(\d{4}[/-]\d{1,2}[/-]\d{1,2})/);
   if (/تبدیل تاریخ|تبدیل شمسی|تبدیل میلادی|تبدیل قمری/i.test(text) && dateMatch) {
-    const from = /قمری/i.test(text) ? "3" : /میلادی\\s*(?:به|تا)\\s*(?:شمسی|فارسی)|میلادی به شمسی/i.test(text) ? "2" : "1";
+    const from = /قمری/i.test(text) ? "3" : /میلادی\s*(?:به|تا)\s*(?:شمسی|فارسی)|میلادی به شمسی/i.test(text) ? "2" : "1";
     return { key: "date:" + from + ":" + dateMatch[1], label: "تبدیل تاریخ", path: "/tools/date/convert?from=" + from + "&date=" + encodeURIComponent(dateMatch[1].replace(/-/g, "/")), cacheSeconds: 86400 };
   }
-  const translation = text.match(/ترجمه\\s+(.+?)\\s+به\\s+(انگلیسی|فارسی|عربی|ترکی|آلمانی|فرانسوی|روسی|اسپانیایی)/i);
+  const translation = text.match(/ترجمه\s+(.+?)\s+به\s+(انگلیسی|فارسی|عربی|ترکی|آلمانی|فرانسوی|روسی|اسپانیایی)/i);
   if (translation) {
     const languages: Record<string, string> = { انگلیسی: "en", فارسی: "fa", عربی: "ar", ترکی: "tr", آلمانی: "de", فرانسوی: "fr", روسی: "ru", اسپانیایی: "es" };
     return { key: "translate:" + languages[translation[2]] + ":" + translation[1], label: "ترجمه متن", path: "/tools/translate?q=" + encodeURIComponent(translation[1].trim()) + "&to=" + languages[translation[2]], cacheSeconds: 3600 };
   }
-  const medicine = text.match(/(?:اطلاعات دارویی|عوارض داروی|داروی)\\s+(.{2,60})/i);
+  const medicine = text.match(/(?:اطلاعات دارویی|عوارض داروی|داروی)\s+(.{2,60})/i);
   if (medicine && !/اطلاعات دارویی چیه/i.test(medicine[1])) return { key: "medicine:" + medicine[1].trim(), label: "جست‌وجوی اطلاعات دارویی", path: "/darooyab/search?search=" + encodeURIComponent(medicine[1].trim()), cacheSeconds: 3600 };
   if (/تشخیص موزیک|شازم|آهنگ.?یاب|اسم این آهنگ/i.test(text) && imageLink) return { key: "music:recognition:" + imageLink, label: "تشخیص موزیک", path: "/music/recognition?url=" + encodeURIComponent(imageLink), cacheSeconds: 3600 };
   if (/جیبلی|ghibli/i.test(text) && imageLink) return { key: "image:ghibli:" + imageLink, label: "تبدیل عکس به جیبلی", path: "/ai/ghibli?url=" + encodeURIComponent(imageLink), cacheSeconds: 3600 };
