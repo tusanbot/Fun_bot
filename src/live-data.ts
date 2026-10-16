@@ -73,7 +73,8 @@ function getIntent(prompt: string): Intent | null {
   if (/قیمت.?خودرو|قیمت.?ماشین|قیمت.?خودروها/i.test(text)) return { key: "prices:car", label: "قیمت خودرو", path: "/prices?action=car", cacheSeconds: 600 };
   if (/آب.?و.?هوا|هواشناسی|هوای\s+/i.test(text)) {
     const cities: Record<string, string> = { تهران: "tehran", تبریز: "tabriz", مراغه: "maragheh", ارومیه: "urmia", باکو: "baku", مشهد: "mashhad", اصفهان: "isfahan", شیراز: "shiraz", کرج: "karaj", قم: "qom", رشت: "rasht", اردبیل: "ardabil", زنجان: "zanjan", اهواز: "ahvaz", استانبول: "istanbul", برلین: "berlin" };
-    const city = Object.keys(cities).find((name) => text.includes(name)) ?? "تهران";
+    const city = Object.keys(cities).find((name) => text.includes(name));
+    if (!city) return null;
     return { key: "weather:" + cities[city], label: "آب‌وهوای " + city, path: "/tools/weather?city=" + cities[city], cacheSeconds: 900 };
   }
   if (/فال قهوه|قهوه سه نشان/i.test(text)) return { key: "fun:coffee", label: "فال قهوه سه نشان", path: "/fun/fal/coffee", cacheSeconds: 3600 };
@@ -156,6 +157,10 @@ async function requestMajid(env: LiveDataEnv, intent: Intent): Promise<string> {
 }
 
 export async function fetchLiveDataContext(prompt: string, env: LiveDataEnv): Promise<string> {
+  if (/آب.?و.?هوا|هواشناسی|هوای\s+/i.test(prompt) &&
+      !/(تهران|تبریز|مراغه|ارومیه|باکو|مشهد|اصفهان|شیراز|کرج|قم|رشت|اردبیل|زنجان|اهواز|استانبول|برلین)/i.test(prompt)) {
+    return "کاربر آب‌وهوا می‌خواهد اما نام شهر مشخص نشده است؛ قبل از ارائه هر پیش‌بینی، از او بپرس برای کدام شهر.";
+  }
   const intent = getIntent(prompt);
   if (!intent) return "";
   try {
