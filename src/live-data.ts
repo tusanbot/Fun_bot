@@ -14,7 +14,7 @@ function getIntent(prompt: string): Intent | null {
 
   const titleMatch = text.match(/(?:جستجوی?\s*)?(?:فیلم|سریال)\s+(?:به نام\s+)?(.{2,80})/i);
   if (titleMatch && !/چی پیشنهاد|چه فیلم|چه سریال|قیمت|و سریال/i.test(titleMatch[1])) return { key: "movie:" + titleMatch[1].trim(), label: "جست‌وجوی فیلم و سریال", path: "/movie/movie4?action=search&s=" + encodeURIComponent(titleMatch[1].trim()) + "&page=1", cacheSeconds: 1800 };
-  const musicSearch = text.match(/(?:جستجوی?\s*)?(?:آهنگ|موزیک|موسیقی)\s+(?:از|به نام|برای)?\s*(.{2,80})/i);
+  const musicSearch = text.match(/(?:جستجوی?\s*(?:آهنگ|موزیک|موسیقی)|(?:آهنگ|موزیک|موسیقی)\s+(?:از|به نام))\s*(.{2,80})/i);
   if (musicSearch && !/یاب|تشخیص|اسم این|چی پیشنهاد/i.test(musicSearch[1])) return { key: "music:search:" + musicSearch[1].trim(), label: "جست‌وجوی موسیقی", path: "/soundcloud/search?s=" + encodeURIComponent(musicSearch[1].trim()), cacheSeconds: 1800 };
   const imageLink = text.match(/https?:\/\/\S+/i)?.[0]?.replace(/[),.]+$/, "");
   if (/تشخیص موزیک|شازم|آهنگ.?یاب|اسم این آهنگ/i.test(text) && imageLink) return { key: "music:recognition:" + imageLink, label: "تشخیص موزیک", path: "/music/recognition?url=" + encodeURIComponent(imageLink), cacheSeconds: 3600 };
@@ -29,8 +29,8 @@ function getIntent(prompt: string): Intent | null {
   if (/اخبار|خبرهای|آخرین خبر/i.test(text)) return { key: "news:latest", label: "آخرین اخبار", path: "/news/akharinkhabar?action=latest&page=1", cacheSeconds: 600 };
   if (/مناسبت.?های ماه|مناسبت.?های این ماه|مناسبت.?ماه/i.test(text)) return { key: "occasions:month", label: "مناسبت‌های ماه", path: "/tools/occasions", cacheSeconds: 3600 };
   if (/قیمت.?طلا|طلای ۱۸|طلای 18|سکه|قیمت.?بازار طلا/i.test(text)) return { key: "prices:gold", label: "قیمت طلا و سکه", path: "/prices?action=gold", cacheSeconds: 300 };
-  if (/قیمت.?ارز|نرخ.?ارز|دلار|یورو|پوند|درهم/i.test(text)) return { key: "prices:currency", label: "نرخ ارز", path: "/prices?action=currency", cacheSeconds: 300 };
   if (/قیمت.?رمزارز|قیمت.?ارز.?دیجیتال|بیت.?کوین|اتریوم|قیمت.?کریپتو/i.test(text)) return { key: "prices:crypto", label: "قیمت رمزارزها", path: "/prices?action=crypto", cacheSeconds: 300 };
+  if (/قیمت.?ارز|نرخ.?ارز|دلار|یورو|پوند|درهم/i.test(text)) return { key: "prices:currency", label: "نرخ ارز", path: "/prices?action=currency", cacheSeconds: 300 };
   if (/قیمت.?خودرو|قیمت.?ماشین|قیمت.?خودروها/i.test(text)) return { key: "prices:car", label: "قیمت خودرو", path: "/prices?action=car", cacheSeconds: 600 };
   if (/آب.?و.?هوا|هواشناسی|هوای\s+/i.test(text)) {
     const cities: Record<string, string> = { تهران: "tehran", تبریز: "tabriz", مراغه: "maragheh", ارومیه: "urmia", باکو: "baku", مشهد: "mashhad", اصفهان: "isfahan", شیراز: "shiraz", کرج: "karaj", قم: "qom", رشت: "rasht", اردبیل: "ardabil", زنجان: "zanjan", اهواز: "ahvaz", استانبول: "istanbul", برلین: "berlin" };
