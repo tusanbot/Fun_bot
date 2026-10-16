@@ -1,150 +1,110 @@
 interface LiveDataEnv {
   DB: D1Database;
-  API_FOOTBALL_KEY?: string;
+  MAJID_API_TOKEN?: string;
 }
 
-type MarketItem = {
-  symbol?: string;
-  name_fa?: string;
-  price?: number;
-  timestamp?: string;
-  timestamp_jalali?: string;
-  stale?: boolean;
-  change_pct?: number | null;
-  quality?: string[];
-};
-type MarketPayload = { data?: { generated_at_jalali?: string; categories?: Record<string, MarketItem[]> } };
-type FootballFixture = {
-  fixture?: { date?: string; status?: { short?: string; elapsed?: number | null } };
-  league?: { name?: string };
-  teams?: { home?: { name?: string }; away?: { name?: string } };
-  goals?: { home?: number | null; away?: number | null };
-};
+type Intent = { key: string; label: string; path: string; cacheSeconds: number };
 
-const MARKET_URL = "https://raw.githubusercontent.com/iran-market/iran-market.github.io/main/data/latest-toman.json";
-const FOOTBALL_URL = "https://v3.football.api-sports.io/fixtures?live=all";
+const API_BASE = "https://api.majidapi.ir";
 
-function formatNumber(value: number): string {
-  return new Intl.NumberFormat("fa-IR", { maximumFractionDigits: 2 }).format(value);
-}
-function isMarketQuestion(prompt: string): boolean {
-  return /طلا|طلای|سکه|نیم.?سکه|ربع.?سکه|آبشده|گرم.?۱۸|۱۸.?عیار|قیمت.?بازار/i.test(prompt);
-}
-function isFootballQuestion(prompt: string): boolean {
-  return /فوتبال|نتیجه.?بازی|بازی.?چند.?چنده|چند.?چند|اسکور|لایو.?اسکور|مسابقه|لیگ.?قهرمانان|پریمیر.?لیگ|رئال|بارسلونا|منچستر|استقلال|پرسپولیس|آرسنال|لیورپول/i.test(prompt);
+function getIntent(prompt: string): Intent | null {
+  const text = prompt.toLowerCase();
+  const mobile = text.match(/(?:قیمت|نرخ)\s*(?:گوشی|موبایل)\s+(.+)/i);
+  if (mobile) return { key: "mobile:" + mobile[1].trim().slice(0, 60), label: "قیمت موبایل", path: "/price/mobile?model=" + encodeURIComponent(mobile[1].trim().slice(0, 60)), cacheSeconds: 600 };
+  if (/ورزش\s*3|ورزش سه|varzesh3/i.test(text)) return { key: "varzesh3:live", label: "نتایج زنده ورزش سه", path: "/varzesh3?action=liveScore", cacheSeconds: 90 };
+  if (/فوتبال\s*360|football\s*360/i.test(text)) return { key: "football360:live", label: "فوتبال ۳۶۰", path: "/football360?action=live", cacheSeconds: 90 };
+  if (/فوتبال|نتیجه.?بازی|بازی.?چند.?چنده|چند.?چند|اسکور|مسابقه زنده|لیگ قهرمانان|پریمیر لیگ|رئال|بارسلونا|منچستر|استقلال|پرسپولیس|آرسنال|لیورپول/i.test(text)) return { key: "football360:live", label: "نتایج زنده فوتبال ۳۶۰", path: "/football360?action=live", cacheSeconds: 90 };
+  if (/اخبار|خبرهای|آخرین خبر/i.test(text)) return { key: "news:latest", label: "آخرین اخبار", path: "/news/akharinkhabar?action=latest&page=1", cacheSeconds: 600 };
+  if (/مناسبت.?های ماه|مناسبت.?های این ماه|مناسبت.?ماه/i.test(text)) return { key: "occasions:month", label: "مناسبت‌های ماه", path: "/tools/occasions", cacheSeconds: 3600 };
+  if (/قیمت.?طلا|طلای ۱۸|طلای 18|سکه|قیمت.?بازار طلا/i.test(text)) return { key: "prices:gold", label: "قیمت طلا و سکه", path: "/prices?action=gold", cacheSeconds: 300 };
+  if (/قیمت.?ارز|نرخ.?ارز|دلار|یورو|پوند|درهم/i.test(text)) return { key: "prices:currency", label: "نرخ ارز", path: "/prices?action=currency", cacheSeconds: 300 };
+  if (/قیمت.?رمزارز|قیمت.?ارز.?دیجیتال|بیت.?کوین|اتریوم|قیمت.?کریپتو/i.test(text)) return { key: "prices:crypto", label: "قیمت رمزارزها", path: "/prices?action=crypto", cacheSeconds: 300 };
+  if (/قیمت.?خودرو|قیمت.?ماشین|قیمت.?خودروها/i.test(text)) return { key: "prices:car", label: "قیمت خودرو", path: "/prices?action=car", cacheSeconds: 600 };
+  if (/آب.?و.?هوا|هواشناسی|هوای\s+/i.test(text)) {
+    const cities: Record<string, string> = { تهران: "tehran", تبریز: "tabriz", مراغه: "maragheh", ارومیه: "urmia", باکو: "baku", مشهد: "mashhad", اصفهان: "isfahan", شیراز: "shiraz", کرج: "karaj", قم: "qom", رشت: "rasht", اردبیل: "ardabil", زنجان: "zanjan", اهواز: "ahvaz", استانبول: "istanbul", برلین: "berlin" };
+    const city = Object.keys(cities).find((name) => text.includes(name)) ?? "تهران";
+    return { key: "weather:" + cities[city], label: "آب‌وهوای " + city, path: "/tools/weather?city=" + cities[city], cacheSeconds: 900 };
+  }
+  if (/فال قهوه|قهوه سه نشان/i.test(text)) return { key: "fun:coffee", label: "فال قهوه سه نشان", path: "/fun/fal/coffee", cacheSeconds: 3600 };
+  if (/فال حافظ|دیوان حافظ|غزل حافظ/i.test(text)) return { key: "fun:hafez", label: "دیوان حافظ", path: "/fun/divan-hafez?no=1", cacheSeconds: 3600 };
+  if (/فال ابجد/i.test(text)) return { key: "fun:abjad", label: "فال ابجد", path: "/fun/fal/abjad", cacheSeconds: 3600 };
+  if (/پروکسی سالم|لیست پروکسی|پروکسی تلگرام/i.test(text)) return { key: "tools:proxies", label: "فهرست پروکسی تلگرام", path: "/tools/proxies", cacheSeconds: 900 };
+  if (/کانفیگ.?vless|کانفیگ.?vmess/i.test(text)) return { key: "tools:configs", label: "فهرست کانفیگ‌ها", path: "/tools/configs", cacheSeconds: 900 };
+  const musicUrl = text.match(/https?:\/\/\S+/i)?.[0];
+  if (/تشخیص موزیک|شازم|آهنگ.?یاب|اسم این آهنگ/i.test(text) && musicUrl) return { key: "music:recognition:" + musicUrl, label: "تشخیص موزیک", path: "/music/recognition?url=" + encodeURIComponent(musicUrl), cacheSeconds: 3600 };
+  return null;
 }
 
-async function getFootballCache<T>(env: LiveDataEnv): Promise<T | null> {
+function ageSeconds(updatedAt: string): number {
+  const timestamp = Date.parse(updatedAt.replace(" ", "T") + "Z");
+  return Number.isFinite(timestamp) ? Math.max(0, (Date.now() - timestamp) / 1000) : Number.POSITIVE_INFINITY;
+}
+
+async function readCache(env: LiveDataEnv, key: string, ttl: number): Promise<unknown | null> {
   try {
-    const row = await env.DB.prepare(
-      "SELECT setting_value, updated_at FROM bot_settings WHERE setting_key = ?",
-    ).bind("live_data:football_fixtures").first<{ setting_value: string; updated_at: string }>();
-    if (!row) return null;
-    const age = Date.now() - new Date(row.updated_at.replace(" ", "T") + "Z").getTime();
-    if (!Number.isFinite(age) || age < 0 || age > 15 * 60 * 1000) return null;
-    return JSON.parse(row.setting_value) as T;
+    const row = await env.DB.prepare("SELECT setting_value, updated_at FROM bot_settings WHERE setting_key = ?")
+      .bind("majidapi:cache:" + key).first<{ setting_value: string; updated_at: string }>();
+    if (!row || ageSeconds(row.updated_at) > ttl) return null;
+    return JSON.parse(row.setting_value) as unknown;
   } catch {
     return null;
   }
 }
-async function setFootballCache(env: LiveDataEnv, value: unknown): Promise<void> {
+
+async function writeCache(env: LiveDataEnv, key: string, value: unknown): Promise<void> {
   try {
-    await env.DB.prepare(
-      "INSERT INTO bot_settings(setting_key, setting_value, updated_at) VALUES(?, ?, datetime('now')) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value, updated_at=excluded.updated_at",
-    ).bind("live_data:football_fixtures", JSON.stringify(value)).run();
+    await env.DB.prepare("INSERT INTO bot_settings(setting_key, setting_value, updated_at) VALUES(?, ?, datetime('now')) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value, updated_at=datetime('now')")
+      .bind("majidapi:cache:" + key, JSON.stringify(value)).run();
   } catch {
-    // Cache is an optimization; live answers still work if the settings table is unavailable.
+    // The API response remains usable even if caching is unavailable.
   }
 }
 
-async function marketContext(): Promise<string> {
-  const response = await fetch(MARKET_URL, { headers: { accept: "application/json" } });
-  if (!response.ok) throw new Error("Market feed HTTP " + response.status);
-  const payload = await response.json() as MarketPayload;
-  const items = Object.values(payload.data?.categories ?? {}).flat();
-  const wanted: Array<[string, string]> = [
-    ["GOLD_18K_IRR", "طلای ۱۸ عیار (هر گرم)"],
-    ["COIN_EMAMI_IRR", "سکه امامی"],
-    ["COIN_BAHAR_IRR", "سکه بهار آزادی"],
-    ["COIN_HALF_IRR", "نیم‌سکه"],
-    ["COIN_QUARTER_IRR", "ربع‌سکه"],
-    ["COIN_GRAMI_IRR", "سکه گرمی"],
-  ];
-  const lines: string[] = [];
-  for (const [symbol, label] of wanted) {
-    const item = items.find((candidate) => candidate.symbol === symbol);
-    if (!item) continue;
-    const priceAge = item.timestamp ? Date.now() - Date.parse(item.timestamp) : Number.POSITIVE_INFINITY;
-    if (typeof item.price !== "number" || item.price <= 0 || item.stale === true ||
-        (item.quality ?? []).includes("stale") || !Number.isFinite(priceAge) || priceAge < 0 || priceAge > 48 * 60 * 60 * 1000) continue;
-    const timestamp = item.timestamp_jalali || item.timestamp || "زمان نامشخص";
-    const change = typeof item.change_pct === "number"
-      ? "؛ تغییر: " + (item.change_pct > 0 ? "+" : "") + formatNumber(item.change_pct) + "٪"
-      : "";
-    lines.push("- " + label + ": " + formatNumber(item.price) + " تومان" + change + " (ثبت قیمت: " + timestamp + ")");
+async function acquireGlobalSlot(env: LiveDataEnv): Promise<boolean> {
+  try {
+    const result = await env.DB.prepare(
+      "INSERT INTO bot_settings(setting_key, setting_value, updated_at) VALUES('majidapi:last_request', ?, datetime('now')) ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value, updated_at=datetime('now') WHERE datetime(bot_settings.updated_at, '+60 seconds') <= datetime('now')",
+    ).bind(String(Date.now())).run();
+    return (result.meta?.changes ?? 0) > 0;
+  } catch {
+    // Fail closed to avoid exhausting the provider's published free-tier quota.
+    return false;
   }
-  if (!lines.length) {
-    return "داده قیمت بازار ایران دریافت شد، اما هیچ نرخ معتبر و تازه‌ای برای نمایش پیدا نشد. عددی حدس نزن و صادقانه اعلام کن که قیمت قابل‌تأیید در دسترس نیست.";
-  }
-  return [
-    "داده ساختاریافته قیمت بازار ایران (منبع: Iran Market Data؛ منبع داده بازار TGJU):",
-    ...lines,
-    "زمان تولید داده منبع: " + (payload.data?.generated_at_jalali ?? "نامشخص"),
-    "قیمت‌ها به تومان هستند. زمان ثبت هر نرخ را جداگانه بررسی کن؛ داده را لحظه‌ای ننام. اگر کاربر درباره خرید زیورآلات پرسید، توضیح بده که اجرت، سود و مالیات در این نرخ پایه لحاظ نشده‌اند.",
-    "منبع: https://iran-market.github.io/",
-  ].join("\n");
 }
 
-async function footballContext(env: LiveDataEnv): Promise<string> {
-  if (!env.API_FOOTBALL_KEY) {
-    return "کاربر درباره نتیجه فوتبال یا مسابقه زنده پرسیده، اما API_FOOTBALL_KEY هنوز در تنظیمات Worker ثبت نشده است. نتیجه یا امتیاز را حدس نزن؛ کوتاه بگو برای دریافت نتیجه زنده باید کلید API-Football تنظیم شود.";
+function compactPayload(value: unknown): string {
+  let serialized: string;
+  try { serialized = JSON.stringify(value, null, 2); } catch { serialized = String(value); }
+  return serialized.length > 6500 ? serialized.slice(0, 6500) + "\n[ادامه پاسخ منبع به‌دلیل محدودیت طول حذف شد]" : serialized;
+}
+
+async function requestMajid(env: LiveDataEnv, intent: Intent): Promise<string> {
+  const cached = await readCache(env, intent.key, intent.cacheSeconds);
+  if (cached !== null) {
+    return "منبع: Majid API | سرویس: " + intent.label + " | داده کش‌شده\n" + compactPayload(cached);
   }
-  let fixtures = await getFootballCache<FootballFixture[]>(env);
-  if (!fixtures) {
-    const response = await fetch(FOOTBALL_URL, {
-      headers: { "x-apisports-key": env.API_FOOTBALL_KEY, accept: "application/json" },
-    });
-    if (!response.ok) throw new Error("Football feed HTTP " + response.status);
-    const payload = await response.json() as { response?: FootballFixture[]; errors?: unknown };
-    fixtures = payload.response ?? [];
-    await setFootballCache(env, fixtures);
+  if (!env.MAJID_API_TOKEN) {
+    return "برای دریافت " + intent.label + "، توکن Majid API هنوز در Cloudflare Worker با نام MAJID_API_TOKEN تنظیم نشده است. قیمت یا نتیجه را حدس نزن؛ از کاربر بخواه بعد از تنظیم توکن دوباره تلاش کند.";
   }
-  if (!fixtures.length) {
-    return "API-Football گزارش کرده که در داده فعلی مسابقه زنده‌ای وجود ندارد. اگر کاربر درباره مسابقه مشخصی پرسیده، از او نام تیم یا لیگ را بپرس یا بگو مسابقه زنده‌ای در فهرست فعلی نیست.";
+  if (!await acquireGlobalSlot(env)) {
+    return "درخواست جدید به Majid API فعلاً به‌دلیل محدودیت پلن رایگان (یک درخواست در دقیقه) ارسال نشد. داده کش‌شده موجود نبود؛ به کاربر بگو حدود یک دقیقه دیگر دوباره تلاش کند.";
   }
-  const lines = fixtures.slice(0, 30).map((item) => {
-    const home = item.teams?.home?.name ?? "تیم میزبان";
-    const away = item.teams?.away?.name ?? "تیم میهمان";
-    const homeGoals = item.goals?.home;
-    const awayGoals = item.goals?.away;
-    const score = homeGoals == null || awayGoals == null ? "بدون نتیجه ثبت‌شده" : formatNumber(homeGoals) + " - " + formatNumber(awayGoals);
-    const minute = item.fixture?.status?.elapsed;
-    const status = minute == null ? (item.fixture?.status?.short ?? "وضعیت نامشخص") : "دقیقه " + formatNumber(minute);
-    return "- " + home + " " + score + " " + away + " | " + (item.league?.name ?? "لیگ نامشخص") + " | " + status;
-  });
-  return [
-    "نتایج مسابقات زنده از API-Football (داده ممکن است به‌علت سهمیه رایگان و کش ۱۵ دقیقه‌ای با تأخیر باشد):",
-    ...lines,
-    "اگر کاربر نام تیم خاصی را گفته، فقط مسابقه‌های مرتبط را انتخاب کن. اگر تیم در فهرست نیست، ادعا نکن که بازی ندارد؛ بگو در فهرست فعلی پیدا نشد.",
-    "منبع: https://www.api-football.com/",
-  ].join("\n");
+  const url = new URL(intent.path, API_BASE);
+  url.searchParams.set("token", env.MAJID_API_TOKEN);
+  const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: AbortSignal.timeout(9000) });
+  if (!response.ok) throw new Error("Majid API HTTP " + response.status);
+  const payload: unknown = await response.json();
+  await writeCache(env, intent.key, payload);
+  return "منبع: Majid API | سرویس: " + intent.label + "\nداده خام JSON زیر را خلاصه کن و فقط واقعیت‌های موجود را گزارش بده؛ زمان و واحد را اگر در خروجی آمده ذکر کن.\n" + compactPayload(payload);
 }
 
 export async function fetchLiveDataContext(prompt: string, env: LiveDataEnv): Promise<string> {
-  const sections: string[] = [];
-  if (isMarketQuestion(prompt)) {
-    try {
-      sections.push(await marketContext());
-    } catch {
-      sections.push("دریافت قیمت بازار ایران ناموفق بود. قیمت را حدس نزن؛ بگو سرویس قیمت فعلاً در دسترس نیست.");
-    }
+  const intent = getIntent(prompt);
+  if (!intent) return "";
+  try {
+    return await requestMajid(env, intent);
+  } catch (error) {
+    console.warn("Majid API request failed", error instanceof Error ? error.message : "unknown error");
+    return "دریافت اطلاعات از Majid API برای «" + intent.label + "» ناموفق بود. داده زنده یا قیمت را حدس نزن؛ صادقانه اعلام کن سرویس فعلاً در دسترس نیست.";
   }
-  if (isFootballQuestion(prompt)) {
-    try {
-      sections.push(await footballContext(env));
-    } catch {
-      sections.push("دریافت نتیجه فوتبال از API ناموفق بود. نتیجه یا وضعیت زنده را حدس نزن و بگو سرویس نتیجه فعلاً در دسترس نیست.");
-    }
-  }
-  return sections.join("\n\n");
 }
