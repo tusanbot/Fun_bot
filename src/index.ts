@@ -450,8 +450,15 @@ async function telegramApi<T>(
 ): Promise<T> {
   // Reply-keyboard actions reuse the existing action handlers without calling Telegram's
   // answerCallbackQuery API, because these actions arrive as ordinary text messages.
-  if (method === "answerCallbackQuery" && String(body.callback_query_id ?? "").startsWith("reply-keyboard:")) {
-    return true as unknown as T;
+  if (method === "answerCallbackQuery") {
+    const syntheticId = String(body.callback_query_id ?? "");
+    if (syntheticId.startsWith("reply-keyboard:")) {
+      const targetChatId = syntheticId.split(":")[1];
+      if (targetChatId && body.text) {
+        await telegramApi(env, "sendMessage", { chat_id: Number(targetChatId), text: String(body.text) });
+      }
+      return true as unknown as T;
+    }
   }
 
   if (method === "sendMessage") {
@@ -982,7 +989,7 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       await handleUpdate(env, {
         update_id: update.update_id,
         callback_query: {
-          id: `reply-keyboard:${update.update_id ?? message.message_id}`,
+          id: `reply-keyboard:${message.chat.id}:${update.update_id ?? message.message_id}`,
           from: message.from,
           data: mappedAction,
           message,
@@ -1005,7 +1012,7 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       await handleUpdate(env, {
         update_id: update.update_id,
         callback_query: {
-          id: `reply-keyboard:${update.update_id ?? message.message_id}`,
+          id: `reply-keyboard:${message.chat.id}:${update.update_id ?? message.message_id}`,
           from: message.from,
           data: mappedAction,
           message,
