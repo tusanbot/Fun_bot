@@ -68,7 +68,13 @@ npm run typecheck
 npm run deploy
 ```
 
-Webhook را روی آدرس Worker به‌علاوه `/webhook` تنظیم کن و مقدار `WEBHOOK_SECRET` را در header با نام `X-Telegram-Bot-Api-Secret-Token` بفرست. endpoint ریشه `/` برای بررسی سلامت است.
+Webhook را طوری تنظیم کن که `allowed_updates` حتماً شامل `callback_query` باشد؛ در غیر این صورت دکمه‌های Inline و بازگشت پیام‌ها به Worker نمی‌رسند. برای تنظیم و راستی‌آزمایی وبهوک، از Node.js اجرا کن:
+
+```bash
+TELEGRAM_BOT_TOKEN='توکن ربات' WEBHOOK_SECRET='همان Secret تنظیم‌شده در Cloudflare' npm run set:webhook
+```
+
+در ویندوز PowerShell می‌توانی متغیرها را جداگانه با `$env:TELEGRAM_BOT_TOKEN='...'` و `$env:WEBHOOK_SECRET='...'` تنظیم کنی و سپس `npm run set:webhook` را اجرا کنی. در صورت استفاده از URL دیگری، متغیر `WEBHOOK_URL` را هم تنظیم کن؛ مقدار پیش‌فرض `https://fun-bot.mshmahyar9.workers.dev/webhook` است. اسکریپت `setWebhook` را با `message`، `edited_message` و `callback_query` اجرا می‌کند و با `getWebhookInfo` نتیجه را بررسی می‌کند؛ آپدیت‌های معلق را حذف نمی‌کند. endpoint ریشه `/` برای بررسی سلامت است.
 
 ## استفاده از ربات
 
