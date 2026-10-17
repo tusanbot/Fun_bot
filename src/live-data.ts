@@ -158,11 +158,11 @@ function compactPayload(value: unknown): string {
       }
       return;
     }
-    const raw = String(item).replace(/[|]+/g, " ").replace(/\\s+/g, " ").trim();
+    const raw = String(item).replace(/[|]+/g, " ").replace(/\s+/g, " ").trim();
     if (raw) lines.push(prefix ? "• " + prefix + ": " + raw : "• " + raw);
   };
   walk(value);
-  return lines.slice(0, 18).join("\\n").slice(0, 3200) || "داده قابل نمایش دریافت نشد.";
+  return lines.slice(0, 18).join("\n").slice(0, 3200) || "داده قابل نمایش دریافت نشد.";
 }
 
 function hasUsablePayload(value: unknown): boolean {
