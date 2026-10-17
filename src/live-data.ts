@@ -8,7 +8,7 @@ type Intent = { key: string; label: string; path: string; cacheSeconds: number }
 const API_BASE = "https://api.majidapi.ir";
 
 function getIntent(prompt: string): Intent | null {
-  const text = prompt.toLowerCase();
+  const text = prompt.toLowerCase().normalize("NFKC").replace(/[\u200c\u200f\u200e\u202a-\u202e]/g, " ").replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/\s+/g, " ").trim();
   const mobile = text.match(/(?:قیمت|نرخ)\s*(?:گوشی|موبایل)\s+(.+)/i);
   if (mobile && !/^(?:چنده|چقدره|قیمت|چی|لطفا|رو بگو|را بگو)[؟?!.،\s]*$/i.test(mobile[1].trim())) return { key: "mobile:" + mobile[1].trim().slice(0, 60), label: "قیمت موبایل", path: "/price/mobile?model=" + encodeURIComponent(mobile[1].trim().slice(0, 60)), cacheSeconds: 600 };
   if (/قیمت موبایل|قیمت گوشی|نرخ موبایل/i.test(text)) return { key: "mobile:brands", label: "برندهای موبایل", path: "/price/mobile?action=brands", cacheSeconds: 3600 };
@@ -89,8 +89,8 @@ function getIntent(prompt: string): Intent | null {
   if (/فال ابجد/i.test(text)) return { key: "fun:abjad", label: "فال ابجد", path: "/fun/fal/abjad", cacheSeconds: 3600 };
   if (/عکس پروفایل|پروفایل رندوم|عکس پروفایل رندوم/i.test(text)) return { key: "fun:profile", label: "عکس پروفایل", path: "/fun/profile?action=random", cacheSeconds: 3600 };
   if (/جوک|لطیفه/i.test(text)) return { key: "fun:joke", label: "جوک", path: "/fun/joke", cacheSeconds: 3600 };
-  if (/پروکسی سالم|لیست پروکسی|پروکسی تلگرام/i.test(text)) return { key: "tools:proxies", label: "فهرست پروکسی تلگرام", path: "/tools/proxies", cacheSeconds: 900 };
-  if (/کانفیگ.?vless|کانفیگ.?vmess/i.test(text)) return { key: "tools:configs", label: "فهرست کانفیگ‌ها", path: "/tools/configs", cacheSeconds: 900 };
+  if (/پروکسی|proxy|socks5/i.test(text)) return { key: "tools:proxies", label: "فهرست پروکسی", path: "/proxylist", cacheSeconds: 900 };
+  if (/کانفیگ|config|vless|vmess|trojan|shadowsocks/i.test(text)) return { key: "tools:configs", label: "فهرست کانفیگ‌ها", path: "/config", cacheSeconds: 900 };
   return null;
 }
 
@@ -137,37 +137,47 @@ function compactPayload(value: unknown): string {
   return serialized.length > 6500 ? serialized.slice(0, 6500) + "\n[ادامه پاسخ منبع به‌دلیل محدودیت طول حذف شد]" : serialized;
 }
 
+function hasUsablePayload(value: unknown): boolean {
+  if (value === null || value === undefined || value === "") return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    if (record.success === false || record.ok === false || record.status === false || record.error || record.errors) return false;
+    if ("data" in record && (record.data === null || record.data === "" || (Array.isArray(record.data) && record.data.length === 0))) return false;
+    return Object.keys(record).length > 0;
+  }
+  return true;
+}
+
 async function requestMajid(env: LiveDataEnv, intent: Intent): Promise<string> {
   const cached = await readCache(env, intent.key, intent.cacheSeconds);
-  if (cached !== null) {
-    return "منبع: Majid API | سرویس: " + intent.label + " | داده کش‌شده\n" + compactPayload(cached);
-  }
-  if (!env.MAJID_API_TOKEN) {
-    return "برای دریافت " + intent.label + "، توکن Majid API هنوز در Cloudflare Worker با نام MAJID_API_TOKEN تنظیم نشده است. قیمت یا نتیجه را حدس نزن؛ از کاربر بخواه بعد از تنظیم توکن دوباره تلاش کند.";
-  }
-  if (!await acquireGlobalSlot(env)) {
-    return "درخواست جدید به Majid API فعلاً به‌دلیل محدودیت پلن رایگان (یک درخواست در دقیقه) ارسال نشد. داده کش‌شده موجود نبود؛ به کاربر بگو حدود یک دقیقه دیگر دوباره تلاش کند.";
-  }
+  if (cached !== null && hasUsablePayload(cached)) return "داده بیرونی برای «" + intent.label + "»:\n" + compactPayload(cached);
+  if (!env.MAJID_API_TOKEN || !await acquireGlobalSlot(env)) return "";
   const url = new URL(intent.path, API_BASE);
   url.searchParams.set("token", env.MAJID_API_TOKEN);
   const response = await fetch(url.toString(), { headers: { accept: "application/json" }, signal: AbortSignal.timeout(9000) });
-  if (!response.ok) throw new Error("Majid API HTTP " + response.status);
+  if (!response.ok) throw new Error("live data HTTP " + response.status);
   const payload: unknown = await response.json();
+  if (!hasUsablePayload(payload)) return "";
   await writeCache(env, intent.key, payload);
-  return "منبع: Majid API | سرویس: " + intent.label + "\nداده خام JSON زیر را خلاصه کن و فقط واقعیت‌های موجود را گزارش بده؛ زمان و واحد را اگر در خروجی آمده ذکر کن.\n" + compactPayload(payload);
+  return "داده بیرونی برای «" + intent.label + "»:\n" + compactPayload(payload);
 }
 
+export function hasLiveDataIntent(prompt: string): boolean {
+  const text = prompt.toLowerCase().normalize("NFKC").replace(/[\u200c\u200f\u200e\u202a-\u202e]/g, " ").replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/\s+/g, " ").trim();
+  return getIntent(prompt) !== null || /آب.?و.?هوا|هواشناسی|هوای\s+|پروکسی|کانفیگ|config|vless|vmess|تاروت|فال تاروت|فاصله|مسافت|اطلاعات دارویی|عوارض داروی|قیمت.?ارز|نرخ.?ارز/i.test(text);
+}
 export async function fetchLiveDataContext(prompt: string, env: LiveDataEnv): Promise<string> {
   if (/آب.?و.?هوا|هواشناسی|هوای\s+/i.test(prompt) &&
       !/(تهران|تبریز|مراغه|ارومیه|باکو|مشهد|اصفهان|شیراز|کرج|قم|رشت|اردبیل|زنجان|اهواز|استانبول|برلین)/i.test(prompt)) {
-    return "کاربر آب‌وهوا می‌خواهد اما نام شهر مشخص نشده است؛ قبل از ارائه هر پیش‌بینی، از او بپرس برای کدام شهر.";
+    return "";
   }
   const intent = getIntent(prompt);
   if (!intent) return "";
   try {
     return await requestMajid(env, intent);
   } catch (error) {
-    console.warn("Majid API request failed", error instanceof Error ? error.message : "unknown error");
-    return "دریافت اطلاعات از Majid API برای «" + intent.label + "» ناموفق بود. داده زنده یا قیمت را حدس نزن؛ صادقانه اعلام کن سرویس فعلاً در دسترس نیست.";
+    console.warn("Live data request failed", error instanceof Error ? error.message : "unknown error");
+    return "";
   }
 }
