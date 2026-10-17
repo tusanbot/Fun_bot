@@ -132,9 +132,37 @@ async function acquireGlobalSlot(env: LiveDataEnv): Promise<boolean> {
 }
 
 function compactPayload(value: unknown): string {
-  let serialized: string;
-  try { serialized = JSON.stringify(value, null, 2); } catch { serialized = String(value); }
-  return serialized.length > 6500 ? serialized.slice(0, 6500) + "\n[ادامه پاسخ منبع به‌دلیل محدودیت طول حذف شد]" : serialized;
+  const labels: Record<string, string> = {
+    city: "شهر", name: "نام", temperature: "دما", temp: "دما", feels_like: "دمای محسوس",
+    condition: "وضعیت", description: "توضیحات", humidity: "رطوبت", wind: "باد",
+    wind_speed: "سرعت باد", pressure: "فشار", visibility: "دید", sunrise: "طلوع",
+    sunset: "غروب", date: "تاریخ", time: "زمان", updated_at: "آخرین به‌روزرسانی",
+    price: "قیمت", value: "مقدار", unit: "واحد", change: "تغییر", percent: "درصد تغییر",
+    symbol: "نماد", title: "عنوان", headline: "عنوان", source: "منبع", text: "متن",
+    min: "کمینه", max: "بیشینه", low: "کمینه", high: "بیشینه",
+    feelsLike: "دمای محسوس", windSpeed: "سرعت باد", humidity_percent: "رطوبت"
+  };
+  const ignored = new Set(["success", "ok", "status", "code", "message", "error", "errors", "token", "key"]);
+  const lines: string[] = [];
+  const walk = (item: unknown, prefix = "", depth = 0): void => {
+    if (lines.length >= 24 || item === null || item === undefined || depth > 3) return;
+    if (Array.isArray(item)) {
+      for (const entry of item.slice(0, 5)) walk(entry, prefix, depth + 1);
+      return;
+    }
+    if (typeof item === "object") {
+      for (const [key, child] of Object.entries(item as Record<string, unknown>)) {
+        if (ignored.has(key.toLowerCase()) || child === null || child === undefined || child === "") continue;
+        const label = labels[key] || key.replace(/[_-]+/g, " ");
+        walk(child, prefix ? prefix + " · " + label : label, depth + 1);
+      }
+      return;
+    }
+    const raw = String(item).replace(/[|]+/g, " ").replace(/\s+/g, " ").trim();
+    if (raw) lines.push(prefix ? "• " + prefix + ": " + raw : "• " + raw);
+  };
+  walk(value);
+  return lines.slice(0, 18).join("\n").slice(0, 3200) || "داده قابل نمایش دریافت نشد.";
 }
 
 function hasUsablePayload(value: unknown): boolean {
