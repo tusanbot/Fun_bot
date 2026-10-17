@@ -803,15 +803,15 @@ async function fetchInternetSearchContext(prompt: string): Promise<string> {
 
 function sanitizeTelegramHtml(value: string): string {
   const preserved: string[] = [];
-  const allowed = /<\\/?(?:b|strong|i|em|u|s|code|pre|blockquote)>|<a href="https?:\\/\\/[^"<>]+">|<\\/a>/gi;
+  const allowed = /<\/?(?:b|strong|i|em|u|s|code|pre|blockquote)>|<a href="https?:\/\/[^"<>]+">|<\/a>/gi;
   let text = value.replace(allowed, (tag) => {
     const token = `__TGHTML_${preserved.length}__`;
     preserved.push(tag);
     return token;
   });
-  text = text.replace(/&(?!(?:amp|lt|gt|quot|#\\d+|#x[\\da-f]+);)/gi, "&amp;")
+  text = text.replace(/&(?!(?:amp|lt|gt|quot|#\d+|#x[\da-f]+);)/gi, "&amp;")
     .replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  return text.replace(/__TGHTML_(\\d+)__/g, (_match, index: string) => preserved[Number(index)] ?? "");
+  return text.replace(/__TGHTML_(\d+)__/g, (_match, index: string) => preserved[Number(index)] ?? "");
 }
 
 async function generateGroqAnswer(
@@ -895,7 +895,7 @@ async function generateGroqAnswer(
         "مثلاً به‌جای «وحید در فلان تاریخ گفته دکتر است» بنویس «شغل وحید: پزشک»؛ فقط وقتی کاربر مشخصاً می‌پرسد چه کسی، چه زمانی یا چه گفته، جزئیات گفتگو را ذکر کن. " +
         "ادعاهای نامطمئن را به‌عنوان واقعیت قطعی بیان نکن؛ اگر اطلاعات کافی نیست، کوتاه و صادقانه بگو. " +
         "اطلاعات گروه‌های دیگر را هرگز وارد پاسخ نکن. نام سرویس‌دهنده‌ها، مدل‌ها، کلیدها، محدودیت درخواست و خطاهای داخلی را افشا نکن. " +
-        "فقط از تگ‌های <b>, <i>, <code>, <pre> و <a href=\"https://...\"> مجاز استفاده کن؛ از Markdown و جدول استفاده نکن.\\n\\n" +
+        "فقط از تگ‌های <b>, <i>, <code>, <pre> و <a href=\"https://...\"> مجاز استفاده کن؛ از Markdown و جدول استفاده نکن.\n\n" +
         (liveAnswered ? "داده ابزار مربوط به درخواست:\n" + liveContext : "تاریخچه و پیام‌های مرتبط همین گروه:\n" + (context || "اطلاعات مرتبطی در تاریخچه پیدا نشد.")),
     },
     ...(internetContext ? [{ role: "system" as const, content: "نتایج جست‌وجوی اینترنتی زیر را بررسی کن؛ اگر استفاده کردی نام و نشانی منبع را ذکر کن و ادعاهای فراتر از نتایج نکن.\n\n" + internetContext }] : []),
