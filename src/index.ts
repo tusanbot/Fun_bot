@@ -141,7 +141,7 @@ async function showPrivateMenu(env: Env, chatId: number, userId: number): Promis
 
 async function showHelp(env: Env, chatId: number): Promise<void> {
   await telegramApi(env,"sendMessage",{chat_id:chatId,
-    text:"راهنمای ربات حافظه گروه\n\n• پرسش از حافظه: در گروه ربات را منشن کن یا به پیامش ریپلای بزن.\n• فعال‌سازی گروه: گروه باید توسط مدیر کل ربات تأیید شده باشد.\n• تنظیمات گروه: از پیوی ربات، مدیریت گروه‌ها را باز کن و گروه را انتخاب کن.\n• ثبت کلید AI: از تنظیمات گروه گزینه تنظیم کلید را بزن و کلید را فقط در پیوی ارسال کن؛ کلید رمزگذاری‌شده ذخیره می‌شود.\n• ثبت تاریخچه: در گروه مقصد /history را بفرست؛ سپس خروجی JSON/HTML/TXT تلگرام یا متن ساده را در پیوی ربات ارسال کن.\n• حافظه گروه: مدیر گروه می‌تواند ذخیره‌سازی را خاموش/روشن کند و سقف تعداد پیام و مدت نگهداری را تعیین کند.\n• شناسه عددی: دستور /id یا /myid را بفرست؛ برای دیدن شناسه فرد دیگر به پیامش ریپلای کن و /id بزن.\n• ساخت تصویر: در گروه تأییدشده /image توضیح تصویر را بفرست؛ هر گروه روزانه یک تصویر می‌سازد. اگر این قابلیت فعال نباشد، با مدیر ربات تماس بگیر.\n• مدیر کل: برای دسترسی به پنل عمومی، شناسه عددی حساب باید در ADMIN_USER_IDS در Cloudflare باشد.",
+    text:"راهنمای ربات حافظه گروه\n\n• پرسش از حافظه: در گروه ربات را منشن کن یا به پیامش ریپلای بزن.\n• فعال‌سازی گروه: گروه باید توسط مدیر کل ربات تأیید شده باشد.\n• تنظیمات گروه: از پیوی ربات، مدیریت گروه‌ها را باز کن و گروه را انتخاب کن.\n• ثبت کلید AI: از تنظیمات گروه گزینه تنظیم کلید را بزن و کلید را فقط در پیوی ارسال کن؛ کلید رمزگذاری‌شده ذخیره می‌شود.\n• ثبت تاریخچه: در گروه مقصد عبارت «تاریخچه» را بفرست؛ سپس خروجی JSON/HTML/TXT تلگرام یا متن ساده را در پیوی ربات ارسال کن.\n• حافظه گروه: مدیر گروه می‌تواند ذخیره‌سازی را خاموش/روشن کند و سقف تعداد پیام و مدت نگهداری را تعیین کند.\n• شناسه عددی: دستور /id یا /myid را بفرست؛ برای دیدن شناسه فرد دیگر به پیامش ریپلای کن و /id بزن.\n• ساخت تصویر: در گروه تأییدشده /image توضیح تصویر را بفرست؛ هر گروه روزانه یک تصویر می‌سازد. اگر این قابلیت فعال نباشد، با مدیر ربات تماس بگیر.\n• مدیر کل: برای دسترسی به پنل عمومی، شناسه عددی حساب باید در ADMIN_USER_IDS در Cloudflare باشد.",
     reply_markup:{inline_keyboard:[[{text:"بازگشت به منوی اصلی",callback_data:"private_home"}],[{text:"مدیریت گروه‌ها",callback_data:"group_manage_list"}]]}});
 }
 
@@ -556,6 +556,20 @@ async function findReplyKeyboardAction(env: Env, chatId: number, text: string): 
   }
 }
 
+function normalizeTextCommand(text: string): string {
+  return text.normalize("NFKC").replace(/[يى]/g, "ی").replace(/ك/g, "ک")
+    .replace(/[\u064B-\u065F\u0670]/g, "").replace(/\s+/g, " ")
+    .trim().replace(/[،,:؛.!؟?]+$/g, "").trim();
+}
+
+function getMemoraTextPrompt(text: string): string | null {
+  const trimmed = text.trim();
+  const normalized = normalizeTextCommand(trimmed);
+  if (normalized !== "ممو" && !normalized.startsWith("ممو ")) return null;
+  const match = trimmed.match(/^ممو(?:[\s،,:؛.!؟?\-]+|$)/u);
+  return match ? trimmed.slice(match[0].length).trim() : null;
+}
+
 function isExplicitlyAddressed(message: TelegramMessage, botUsername: string): boolean {
   const normalizedUsername = botUsername.replace(/^@/, "").toLowerCase();
   if (!normalizedUsername) return false;
@@ -592,6 +606,11 @@ function removeBotMention(text: string, message: TelegramMessage, botUsername: s
 
 async function saveMessage(env: Env, message: TelegramMessage): Promise<void> {
   const chatId = String(message.chat.id);
+  // A read-only group must not receive new message, group-metadata, or user-metadata writes.
+  const settings = await env.DB.prepare("SELECT memory_enabled,max_messages,retention_days FROM groups WHERE chat_id=?")
+    .bind(chatId).first<{memory_enabled:number;max_messages:number;retention_days:number}>();
+  if (settings && settings.memory_enabled === 0) return;
+
   const userId = message.from ? String(message.from.id) : null;
   const displayName = message.from
     ? [message.from.first_name, message.from.last_name].filter(Boolean).join(" ")
@@ -616,10 +635,6 @@ async function saveMessage(env: Env, message: TelegramMessage): Promise<void> {
     ).bind(chatId, userId, displayName, message.from.username ?? null).run();
   }
 
-  const settings = await env.DB.prepare("SELECT memory_enabled,max_messages,retention_days FROM groups WHERE chat_id=?")
-    .bind(chatId).first<{memory_enabled:number;max_messages:number;retention_days:number}>();
-  if (settings && settings.memory_enabled === 0) return;
-
   await env.DB.prepare(
     `INSERT INTO messages
       (chat_id, telegram_message_id, user_id, message_date, text_content, reply_to_message_id, source)
@@ -640,7 +655,6 @@ async function saveMessage(env: Env, message: TelegramMessage): Promise<void> {
   await env.DB.prepare("DELETE FROM messages WHERE chat_id=? AND julianday(message_date) < julianday('now', '-' || ? || ' days')").bind(chatId,retentionDays).run();
   await env.DB.prepare("DELETE FROM messages WHERE chat_id=? AND id NOT IN (SELECT id FROM messages WHERE chat_id=? ORDER BY julianday(message_date) DESC,id DESC LIMIT ?)").bind(chatId,chatId,maxMessages).run();
 }
-
 
 async function ensureHistoryImportTable(env: Env): Promise<void> {
   await env.DB.prepare(
@@ -667,7 +681,13 @@ async function importTelegramExport(
      WHERE user_id = ? AND expires_at > datetime('now')`,
   ).bind(String(message.from.id)).first<{ chat_id: string; chat_title: string | null }>();
   if (!session) {
-    return "برای این حساب واردسازی فعالی پیدا نکردم. ابتدا در گروه مقصد دستور /history را بفرست و بعد فایل را همین‌جا ارسال کن.";
+    return "برای این حساب واردسازی فعالی پیدا نکردم. ابتدا در گروه مقصد عبارت «تاریخچه» را بفرست و بعد فایل را همین‌جا ارسال کن.";
+  }
+  const targetSettings = await env.DB.prepare("SELECT memory_enabled FROM groups WHERE chat_id=?")
+    .bind(session.chat_id).first<{memory_enabled:number}>();
+  if (!targetSettings || targetSettings.memory_enabled === 0) {
+    await env.DB.prepare("DELETE FROM history_import_sessions WHERE user_id=?").bind(String(message.from.id)).run();
+    return "ذخیره‌سازی یا واردسازی تاریخچه برای این گروه غیرفعال است؛ تاریخچه قبلی بدون تغییر حفظ می‌شود.";
   }
 
   const file = await telegramApi<{ file_path?: string }>(env, "getFile", { file_id: fileId });
@@ -1145,7 +1165,11 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     }
     if (await processAdminPrivateMessage(env, message)) return;
     if (privateMenuText === "راهنمای ربات") { await showHelp(env,message.chat.id); return; }
-    if (privateMenuText === "مدیریت گروه‌ها" || privateMenuText === "مدیریت گروه‌ها (مدیر گروه)") { await showUserGroups(env,message.chat.id,message.from.id); return; }
+    if (normalizeTextCommand(privateMenuText) === "مدیریت گروه" || privateMenuText === "مدیریت گروه‌ها" || privateMenuText === "مدیریت گروه‌ها (مدیر گروه)") { await showUserGroups(env,message.chat.id,message.from.id); return; }
+    if (normalizeTextCommand(privateMenuText) === "تاریخچه") {
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"برای افزودن تاریخچه، عبارت «تاریخچه» را در گروه مقصد بفرست؛ سپس فایل خروجی Telegram Desktop یا متن ساده را همین‌جا در پیوی ارسال کن."});
+      return;
+    }
     if (privateMenuText === "پنل مدیریت کل ربات") {
       if (isAdmin(env,message.from.id)) await showAdminPanel(env,message.chat.id);
       else await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"این بخش مخصوص مدیر کل ربات است. برای فعال‌سازی، شناسه عددی تلگرام مدیر را در متغیر ADMIN_USER_IDS در Cloudflare ثبت کن."});
@@ -1168,6 +1192,16 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       return;
     }
   }
+  const groupTextCommand = normalizeTextCommand(privateMenuText);
+  if (message.chat.type !== "private" && message.from && groupTextCommand === "مدیریت گروه") {
+    const botUsername = env.BOT_USERNAME.replace(/^@/, "");
+    await telegramApi(env,"sendMessage",{chat_id:message.chat.id,
+      text:"برای حفظ امنیت تنظیمات، گفتگوی خصوصی ربات را باز کن و عبارت «مدیریت گروه» را بفرست.",
+      reply_markup:{inline_keyboard:[[{text:"باز کردن گفتگوی خصوصی ربات",url:"https://t.me/"+botUsername}]]},
+      reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});
+    return;
+  }
+
   const command = rawText.trim().split(/\s+/, 1)[0].split("@")[0].toLowerCase();
 
   if (command === "/id" || command === "/myid" || command === "/userid") {
@@ -1226,7 +1260,7 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     return;
   }
 
-  if (command === "/history" || command === "/history_text") {
+  if (command === "/history" || command === "/history_text" || (message.chat.type !== "private" && groupTextCommand === "تاریخچه")) {
     if (message.chat.type === "private") {
       await telegramApi(env, "sendMessage", {
         chat_id: message.chat.id,
@@ -1260,6 +1294,14 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
       .bind(String(message.chat.id)).first<{approved:number;enabled:number}>();
     if (!approvedGroup || !approvedGroup.approved || !approvedGroup.enabled) {
       await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"این گروه هنوز توسط مدیر ربات تأیید نشده است؛ پس از تأیید، واردسازی تاریخچه فعال می‌شود.",reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});
+      return;
+    }
+    const historySettings = await env.DB.prepare("SELECT memory_enabled FROM groups WHERE chat_id=?")
+      .bind(String(message.chat.id)).first<{memory_enabled:number}>();
+    if (!historySettings || historySettings.memory_enabled === 0) {
+      await telegramApi(env,"sendMessage",{chat_id:message.chat.id,
+        text:"واردسازی تاریخچه برای این گروه غیرفعال است؛ فقط از پیام‌های قبلی استفاده می‌شود و هیچ داده جدیدی ذخیره نخواهد شد.",
+        reply_parameters:{message_id:message.message_id,allow_sending_without_reply:true}});
       return;
     }
     await ensureHistoryImportTable(env);
@@ -1308,6 +1350,13 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
     const historySession = await env.DB.prepare("SELECT chat_id,chat_title FROM history_import_sessions WHERE user_id=? AND expires_at>datetime('now')")
       .bind(String(message.from.id)).first<{chat_id:string;chat_title:string|null}>();
     if (historySession && !message.text.trim().startsWith("/")) {
+      const historyTarget = await env.DB.prepare("SELECT memory_enabled FROM groups WHERE chat_id=?")
+        .bind(historySession.chat_id).first<{memory_enabled:number}>();
+      if (!historyTarget || historyTarget.memory_enabled === 0) {
+        await env.DB.prepare("DELETE FROM history_import_sessions WHERE user_id=?").bind(String(message.from.id)).run();
+        await telegramApi(env,"sendMessage",{chat_id:message.chat.id,text:"واردسازی برای این گروه غیرفعال است؛ هیچ خطی ذخیره نشد و تاریخچه قبلی محفوظ است."});
+        return;
+      }
       const lines = message.text.split(/\r?\n/).map(line => line.trim()).filter(Boolean).slice(0, 1000);
       let inserted = 0, failed = 0;
       for (let i=0;i<lines.length;i+=40) {
@@ -1344,10 +1393,11 @@ async function handleUpdate(env: Env, update: TelegramUpdate): Promise<void> {
   }
 
   await saveMessage(env, message);
-  if (!isExplicitlyAddressed(message, env.BOT_USERNAME)) return;
-
   const text = message.text ?? message.caption ?? "";
-  const prompt = removeBotMention(text, message, env.BOT_USERNAME) ||
+  const memoraPrompt = getMemoraTextPrompt(text);
+  if (!isExplicitlyAddressed(message, env.BOT_USERNAME) && memoraPrompt === null) return;
+
+  const prompt = (memoraPrompt !== null ? memoraPrompt : removeBotMention(text, message, env.BOT_USERNAME)) ||
     (message.reply_to_message?.text
       ? `لطفاً به این پیام پاسخ بده: ${message.reply_to_message.text.slice(0, 1000)}`
       : "");
