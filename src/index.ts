@@ -141,7 +141,8 @@ async function showPrivateMenu(env: Env, chatId: number, userId: number): Promis
 
 async function showHelp(env: Env, chatId: number): Promise<void> {
   await telegramApi(env,"sendMessage",{chat_id:chatId,
-    text:"راهنمای ربات حافظه گروه\n\n• پرسش از حافظه: در گروه ربات را منشن کن یا به پیامش ریپلای بزن.\n• فعال‌سازی گروه: گروه باید توسط مدیر کل ربات تأیید شده باشد.\n• تنظیمات گروه: از پیوی ربات، مدیریت گروه‌ها را باز کن و گروه را انتخاب کن.\n• ثبت کلید AI: از تنظیمات گروه گزینه تنظیم کلید را بزن و کلید را فقط در پیوی ارسال کن؛ کلید رمزگذاری‌شده ذخیره می‌شود.\n• ثبت تاریخچه: در گروه مقصد عبارت «تاریخچه» را بفرست؛ سپس خروجی JSON/HTML/TXT تلگرام یا متن ساده را در پیوی ربات ارسال کن.\n• حافظه گروه: مدیر گروه می‌تواند ذخیره‌سازی را خاموش/روشن کند و سقف تعداد پیام و مدت نگهداری را تعیین کند.\n• شناسه عددی: دستور /id یا /myid را بفرست؛ برای دیدن شناسه فرد دیگر به پیامش ریپلای کن و /id بزن.\n• ساخت تصویر: در گروه تأییدشده /image توضیح تصویر را بفرست؛ هر گروه روزانه یک تصویر می‌سازد. اگر این قابلیت فعال نباشد، با مدیر ربات تماس بگیر.\n• مدیر کل: برای دسترسی به پنل عمومی، شناسه عددی حساب باید در ADMIN_USER_IDS در Cloudflare باشد.",
+    text:"راهنمای ربات حافظه گروه\n\n• صدا زدن ربات: در گروه بنویس «ممو» و بعد سؤال را وارد کن؛ می‌توانی فقط «ممو» بنویسی و به پیام موردنظر ریپلای بزنی.
+• مدیریت گروه: در پیوی ربات عبارت «مدیریت گروه» را بفرست.\n• فعال‌سازی گروه: گروه باید توسط مدیر کل ربات تأیید شده باشد.\n• تنظیمات گروه: از پیوی ربات، مدیریت گروه‌ها را باز کن و گروه را انتخاب کن.\n• ثبت کلید AI: از تنظیمات گروه گزینه تنظیم کلید را بزن و کلید را فقط در پیوی ارسال کن؛ کلید رمزگذاری‌شده ذخیره می‌شود.\n• ثبت تاریخچه: در گروه مقصد عبارت «تاریخچه» را بفرست؛ سپس خروجی JSON/HTML/TXT تلگرام یا متن ساده را در پیوی ربات ارسال کن.\n• حافظه گروه: مدیر گروه می‌تواند ذخیره‌سازی را خاموش/روشن کند و سقف تعداد پیام و مدت نگهداری را تعیین کند.\n• شناسه عددی: دستور /id یا /myid را بفرست؛ برای دیدن شناسه فرد دیگر به پیامش ریپلای کن و /id بزن.\n• ساخت تصویر: در گروه تأییدشده /image توضیح تصویر را بفرست؛ هر گروه روزانه یک تصویر می‌سازد. اگر این قابلیت فعال نباشد، با مدیر ربات تماس بگیر.\n• مدیر کل: برای دسترسی به پنل عمومی، شناسه عددی حساب باید در ADMIN_USER_IDS در Cloudflare باشد.",
     reply_markup:{inline_keyboard:[[{text:"بازگشت به منوی اصلی",callback_data:"private_home"}],[{text:"مدیریت گروه‌ها",callback_data:"group_manage_list"}]]}});
 }
 
@@ -237,7 +238,12 @@ async function handleCallback(env: Env, query: TelegramCallbackQuery): Promise<v
     const groupId=data.slice("group_history:".length);
     await telegramApi(env,"answerCallbackQuery",{callback_query_id:query.id});
     if (!await isGroupAdmin(env,groupId,query.from.id)) { await telegramApi(env,"sendMessage",{chat_id:chatId,text:"دسترسی مدیر گروه لازم است."}); return; }
-    await telegramApi(env,"sendMessage",{chat_id:chatId,text:"برای ثبت تاریخچه، در گروه مقصد /history را بفرست؛ سپس فایل JSON/HTML/TXT خروجی Telegram Desktop یا متن ساده را همین‌جا در پیوی ارسال کن.",reply_markup:{inline_keyboard:[[{text:"بازگشت به تنظیمات گروه",callback_data:"group_settings:"+groupId}]]}});
+    const historySettings = await env.DB.prepare("SELECT memory_enabled FROM groups WHERE chat_id=?")
+      .bind(groupId).first<{memory_enabled:number}>();
+    const historyText = !historySettings || historySettings.memory_enabled === 0
+      ? "این گروه فقط از تاریخچه قبلی استفاده می‌کند. واردسازی پیام جدید غیرفعال است و داده‌های قبلی حفظ می‌شوند."
+      : "برای افزودن تاریخچه، در گروه مقصد عبارت «تاریخچه» را بفرست؛ سپس فایل JSON/HTML/TXT خروجی Telegram Desktop یا متن ساده را همین‌جا در پیوی ارسال کن.";
+    await telegramApi(env,"sendMessage",{chat_id:chatId,text:historyText,reply_markup:{inline_keyboard:[[{text:"بازگشت به تنظیمات گروه",callback_data:"group_settings:"+groupId}]]}});
     return;
   }
   if (data.startsWith("group_key_info:")) {
@@ -565,7 +571,7 @@ function normalizeTextCommand(text: string): string {
 function getMemoraTextPrompt(text: string): string | null {
   const trimmed = text.trim();
   const normalized = normalizeTextCommand(trimmed);
-  if (normalized !== "ممو" && !normalized.startsWith("ممو ")) return null;
+  if (!/^ممو(?:$|[\s،,:؛.!؟?\-])/u.test(normalized)) return null;
   const match = trimmed.match(/^ممو(?:[\s،,:؛.!؟?\-]+|$)/u);
   return match ? trimmed.slice(match[0].length).trim() : null;
 }
